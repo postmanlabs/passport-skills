@@ -1,8 +1,6 @@
 # passport-proxy-setup
 
-> **Unofficial.** Community skills for [Postman Passport](https://app.usepassport.ai); not
-> maintained or endorsed by Postman. Steps were verified on the dates noted in each skill and
-> can drift as the product changes. Use at your own risk — the AWS skill creates billable resources.
+> **Note:** the AWS skill creates billable resources.
 
 Two [Claude Code](https://claude.com/claude-code) skills (also readable as plain step-by-step guides) that
 set up a Passport proxy and **prove it works end to end**: a client calls an API with only a

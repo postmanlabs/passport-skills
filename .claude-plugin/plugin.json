@@ -1,6 +1,6 @@
 {
   "name": "passport-proxy-setup",
   "version": "0.1.0",
-  "description": "Step-by-step, agent-runnable skills to set up and verify a Postman Passport proxy: locally in Docker, or on a single EC2 instance with CloudFront. Unofficial.",
+  "description": "Step-by-step, agent-runnable skills to set up and verify a Postman Passport proxy: locally in Docker, or on a single EC2 instance with CloudFront.",
   "keywords": ["passport", "postman", "proxy", "aws", "docker", "vault"]
 }
