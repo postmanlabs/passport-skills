@@ -1,0 +1,25 @@
+{
+  "CallerReference": "__CALLER_REF__",
+  "Comment": "Passport proxy __NAME__ management",
+  "Enabled": true,
+  "PriceClass": "PriceClass_100",
+  "Origins": {"Quantity": 1, "Items": [{
+    "Id": "passport-mgmt", "DomainName": "__HOSTNAME__",
+    "CustomOriginConfig": {"HTTPPort": 8081, "HTTPSPort": 443, "OriginProtocolPolicy": "http-only",
+      "OriginSslProtocols": {"Quantity": 1, "Items": ["TLSv1.2"]}}
+  }]},
+  "DefaultCacheBehavior": {
+    "TargetOriginId": "passport-mgmt", "ViewerProtocolPolicy": "https-only",
+    "AllowedMethods": {"Quantity": 2, "Items": ["GET","HEAD"], "CachedMethods": {"Quantity": 2, "Items": ["GET","HEAD"]}},
+    "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad", "Compress": false,
+    "FunctionAssociations": {"Quantity": 1, "Items": [{"EventType": "viewer-request", "FunctionARN": "__FN_ARN__"}]}
+  },
+  "CacheBehaviors": {"Quantity": 2, "Items": [
+    {"PathPattern": "/ca.pem", "TargetOriginId": "passport-mgmt", "ViewerProtocolPolicy": "https-only",
+     "AllowedMethods": {"Quantity": 2, "Items": ["GET","HEAD"], "CachedMethods": {"Quantity": 2, "Items": ["GET","HEAD"]}},
+     "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad", "OriginRequestPolicyId": "b689b0a8-53d0-40ab-baf2-68738e2966ac", "Compress": false},
+    {"PathPattern": "/issue-cert", "TargetOriginId": "passport-mgmt", "ViewerProtocolPolicy": "https-only",
+     "AllowedMethods": {"Quantity": 7, "Items": ["GET","HEAD","OPTIONS","PUT","POST","PATCH","DELETE"], "CachedMethods": {"Quantity": 2, "Items": ["GET","HEAD"]}},
+     "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad", "OriginRequestPolicyId": "b689b0a8-53d0-40ab-baf2-68738e2966ac", "Compress": false}
+  ]}
+}

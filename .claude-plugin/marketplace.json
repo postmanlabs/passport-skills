@@ -1,0 +1,11 @@
+{
+  "name": "passport-proxy-setup",
+  "owner": { "name": "postmanlabs" },
+  "plugins": [
+    {
+      "name": "passport-proxy-setup",
+      "source": "./",
+      "description": "Skills to set up and verify a Postman Passport proxy (local Docker, AWS single instance)."
+    }
+  ]
+}

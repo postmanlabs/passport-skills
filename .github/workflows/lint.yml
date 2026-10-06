@@ -1,0 +1,20 @@
+name: lint
+on: [push, pull_request]
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: shellcheck skills/*/scripts/*.sh
+      - name: JS syntax
+        run: for f in skills/*/scripts/*.js skills/*/templates/*.js; do node --check "$f"; done
+      - name: JSON validity
+        run: |
+          jq empty .claude-plugin/plugin.json .claude-plugin/marketplace.json
+          jq empty skills/*/templates/*.json.tmpl 2>/dev/null || true
+      - name: SKILL.md frontmatter
+        run: |
+          for f in skills/*/SKILL.md; do
+            head -1 "$f" | grep -q '^---$' && grep -q '^name: ' "$f" && grep -q '^description: ' "$f" || { echo "bad frontmatter: $f"; exit 1; }
+          done

@@ -1,0 +1,72 @@
+#!/bin/bash
+set -euo pipefail
+exec > >(tee /var/log/passport-bootstrap.log) 2>&1
+# no `set -x`: it would write the Vault token and key handling into the log and the EC2 console output
+
+REGION=__REGION__
+PREFIX=__PREFIX__
+ORG=__ORG__
+SANS=__SANS__
+IMAGE=ociregistry.usepassport.ai/passport/passport-proxy:latest
+
+dnf -y -q install docker jq openssl
+systemctl enable --now docker
+mkdir -p /opt/passport/echo /run/passport
+
+sm() { aws secretsmanager get-secret-value --region "$REGION" --secret-id "$PREFIX/$1" --query SecretString --output text; }
+umask 077
+sm ca-key        > /opt/passport/ca.pem
+sm reference-key > /opt/passport/ref.pem
+# The proxy container runs as a NON-root user, so the key files must be readable by it. This is safe here:
+# the instance has no SSH, only root (and SSM) can reach /opt/passport, and nothing else runs on the host.
+chmod 0644 /opt/passport/ca.pem /opt/passport/ref.pem
+sm registry-key  | docker login ociregistry.usepassport.ai --username passport --password-stdin
+docker pull "$IMAGE"
+docker pull hashicorp/vault:1.17.6
+docker pull node:20
+
+# Echo server for the end-to-end test: self-signed cert for "localhost", logs only a sha256 of x-key.
+openssl req -x509 -newkey rsa:2048 -keyout /opt/passport/echo/echo-key.pem -out /opt/passport/echo/echo-cert.pem \
+  -days 7 -nodes -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+cat > /opt/passport/echo/server.js << 'JS'
+const https = require('https'), crypto = require('crypto'), fs = require('fs');
+const options = { key: fs.readFileSync(__dirname + '/echo-key.pem'), cert: fs.readFileSync(__dirname + '/echo-cert.pem') };
+https.createServer(options, (req, res) => {
+  const val = req.headers['x-key'] || '';
+  const sha256 = crypto.createHash('sha256').update(val).digest('hex');
+  console.log(JSON.stringify({ path: req.url, method: req.method, 'x-key-sha256': sha256, 'x-key-len': val.length }));
+  res.writeHead(200, { 'content-type': 'application/json' });
+  res.end(JSON.stringify({ ok: true, sha256 }));
+}).listen(9443, '0.0.0.0', () => console.log('echo server listening on :9443'));
+JS
+chmod 644 /opt/passport/echo/echo-key.pem
+# Proxy trusts the normal public CAs PLUS the echo cert (so its outbound TLS to localhost:9443 succeeds).
+cat /etc/pki/tls/certs/ca-bundle.crt /opt/passport/echo/echo-cert.pem > /opt/passport/trust.pem
+
+# Local HashiCorp Vault (dev mode, in-memory). Not published on any host port: only the proxy can reach it.
+VAULT_TOKEN=$(openssl rand -hex 24)
+printf 'VAULT_TOKEN=%s\n' "$VAULT_TOKEN" > /opt/passport/vault.env
+docker network create pp-net
+docker run -d --name pp-vault-dev --restart unless-stopped --network pp-net --cap-add=IPC_LOCK \
+  -e VAULT_DEV_ROOT_TOKEN_ID="$VAULT_TOKEN" -e VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200 \
+  hashicorp/vault:1.17.6 server -dev
+sleep 3
+
+docker run -d --name pp-proxy-local --restart unless-stopped --network pp-net -p 8443:8443 -p 8081:8081 \
+  -v /opt/passport:/opt/passport:ro \
+  -e SSL_CERT_FILE=/opt/passport/trust.pem \
+  -e PASSPORT_PROXY_PRIVATE_KEY_PATH=/opt/passport/ca.pem \
+  -e PASSPORT_PROXY_REFERENCE_PRIVATE_KEY_PATH=/opt/passport/ref.pem \
+  -e PASSPORT_PROXY_JWKS_URL=https://api.usepassport.ai/api/v1/bundles/.well-known/jwks.json \
+  -e PASSPORT_PROXY_ALLOWED_TEAM_IDS="$ORG" \
+  -e PASSPORT_PROXY_AUDIT_SINK=stdout \
+  -e PASSPORT_PROXY_DATAPLANE_CERT_SANS="$SANS" \
+  -e PASSPORT_PROXY_VAULT_SOURCE=hashicorp \
+  -e VAULT_ADDR=http://pp-vault-dev:8200 \
+  --env-file /opt/passport/vault.env \
+  "$IMAGE"
+
+# Echo sidecar shares the proxy's network namespace, so "localhost:9443" is reachable AS localhost from the proxy.
+docker run -d --name pp-echo --restart unless-stopped --network container:pp-proxy-local \
+  -v /opt/passport/echo:/echo -w /echo node:20 node server.js
+echo "passport-bootstrap: done"
