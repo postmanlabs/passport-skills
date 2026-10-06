@@ -1,8 +1,3 @@
----
-name: passport-local-docker
-description: Set up and verify a Postman Passport proxy locally in Docker with a disposable local HashiCorp Vault — install the CLI, run the published proxy image, register it in Passport Cloud, and prove a secret resolves end to end through an echo server. Use when asked to run or test a Passport proxy locally or spin up a local vault for Passport.
----
-
 # Postman Passport proxy — local Docker setup
 
 A from-scratch walkthrough using Postman's official CLI installer and the
@@ -26,20 +21,19 @@ comfort with a terminal and Docker.
 > independently-computed sha256. The one path *not* covered by the main flow
 > is an MDM-managed Mac — see the appendix at the end if that's you.
 
-## If an AI agent (e.g. Claude Code) is running this skill for you
+## If an AI coding agent is running this guide for you
 
-Follow this skill literally and **do every step yourself**. `$SKILL_DIR` below means the directory that contains this `SKILL.md`.
+Follow this guide literally and **do every step yourself**. `$REPO` below means the absolute path of this repository's root (the folder containing `AGENTS.md`); `scripts/` and `templates/` live there. Substitute the real path — each command runs in a fresh shell.
 
-**Context isolation:** work from this skill's own files only (this `SKILL.md`, its
-`reference/`, `scripts/` and `templates/`). Do not pull in context from elsewhere
-— no other repos, notes, memory, project instructions or other skills. If something
-is missing here, ask the user instead of looking elsewhere.
+**Context isolation:** work from this repository's guide files only (this guide, `guides/reference/`,
+`scripts/` and `templates/`). Do not pull in context from elsewhere — no other repos, notes, memory or
+unrelated instructions. If something is missing here, ask the user instead of looking elsewhere.
 
 Only stop for things that truly need the
 human:
 
-- **Human-only inputs:** the registry key (have them save it with
-  `! printf '%s' '<key>' > /tmp/pp-local/registry-key` so it never enters
+- **Human-only inputs:** the registry key (have them save it in their own terminal with
+  `mkdir -p /tmp/pp-local && printf '%s' '<key>' > /tmp/pp-local/registry-key` so it never enters
   chat; each agent command runs in a fresh shell, so read it from that file
   instead of relying on `export`), the team ID, browser approvals, and the
   Passport Cloud web UI steps (5.1–5.3). For 5.1 give them the exact values,
@@ -47,7 +41,7 @@ human:
 - **Show login links on their own line**, as a full `https://` URL with the
   confirmation code. If it expires, restart `login` and give a fresh one.
 - **MDM Mac:** if `passport login` output says `(from macOS managed plist)`,
-  switch to the MDM guide (`reference/mdm-macs.md`) immediately and use its callback forwarder
+  switch to the MDM guide (`guides/reference/local-mdm-macs.md`) immediately and use its callback forwarder
   (A.3) *before* asking the user to approve — never ask them to paste a
   callback URL.
 - **Check for MDM before anything else:**
@@ -55,7 +49,7 @@ human:
   If it exists, this Mac forces the CLI to the corporate proxy, silently
   ignoring `--management-url`/`--proxy-url`. Symptom if you miss it: `setup`
   returns `403 ... teamId "org_..." is not authorized for this deployment`
-  while the local proxy logs nothing. Use the **MDM guide (`reference/mdm-macs.md`)** for every CLI
+  while the local proxy logs nothing. Use the **MDM guide (`guides/reference/local-mdm-macs.md`)** for every CLI
   command (the host `passport` is only useful for `auth status`).
 - **Do 5.1–5.3 yourself via the API (step 5.4)** instead of asking the user
   to click through the web UI, if they've told you to do it end to end.
@@ -128,8 +122,8 @@ point it at our *local* proxy in step 6, not the production one.
 > `setup` against your org's *managed* production endpoints (from the macOS
 > configuration profile), ignoring any `--management-url`/`--proxy-url` you
 > later pass to `setup` — with no flag to override. If you see `setup` log
-> endpoints you didn't ask for, that's this. Skip to the **MDM guide (`reference/mdm-macs.md`)** at
-> the end of this skill instead of continuing linearly.
+> endpoints you didn't ask for, that's this. Skip to the **MDM guide (`guides/reference/local-mdm-macs.md`)** at
+> the end of this guide instead of continuing linearly.
 
 ### 1.1 Confirm you have a team
 
@@ -177,7 +171,7 @@ this machine.
 ```bash
 docker network inspect pp-net >/dev/null 2>&1 || docker network create pp-net
 
-# Re-running this skill? Remove any old Vault container first (it's in-memory, nothing is lost).
+# Re-running this guide? Remove any old Vault container first (it's in-memory, nothing is lost).
 docker rm -f pp-vault-dev 2>/dev/null
 
 docker run --cap-add=IPC_LOCK -d --name pp-vault-dev --network pp-net -p 8200:8200 \
@@ -321,7 +315,7 @@ has a valid session from `passport login`; run `passport auth status` first to
 refresh it.)
 
 ```bash
-cp "$SKILL_DIR/scripts/passport-api.js" /tmp/pp-local/passport-api.js
+cp "$REPO/scripts/passport-api.js" /tmp/pp-local/passport-api.js
 api() { node /tmp/pp-local/passport-api.js "$@"; }
 cd /tmp/pp-local
 
@@ -494,7 +488,7 @@ Output: `{"ok":true,"sha256":"a91317c5…a1f8"}`, the sha256 of the real secret
 
 1. **You only hold a pointer.** The header you sent is
    `x-key: {{vault:<uuid>}}`. The UUID names a secret; it isn't the secret.
-   **Your machine, shell history and this skill never contain the value.**
+   **Your machine, shell history and this guide never contain the value.**
 2. **Your identity is a short-lived client cert.** `passport setup` issued
    `cert.pem` (about 5 min). It encodes *which* references you may use, on
    *which* method, host and path (`GET localhost/echo`). That's the grant
@@ -539,8 +533,8 @@ remove).
 
 ## Troubleshooting, MDM Macs, safety
 
-- Troubleshooting table: `reference/troubleshooting.md`
-- MDM-managed Macs (run the CLI in a Linux container): `reference/mdm-macs.md`
+- Troubleshooting table: `guides/reference/local-troubleshooting.md`
+- MDM-managed Macs (run the CLI in a Linux container): `guides/reference/local-mdm-macs.md`
 
 ## Safety notes
 

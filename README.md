@@ -1,37 +1,44 @@
 # postman-passport-setup
 
-> **Note:** the AWS skill creates billable resources.
+> **Note:** the AWS guide creates billable resources.
 
-Two [Claude Code](https://claude.com/claude-code) skills (also readable as plain step-by-step guides) that
-set up a Passport proxy and **prove it works end to end**: a client calls an API with only a
+Set up a Postman Passport proxy and **prove it works end to end**: a client calls an API with only a
 `{{vault:<uuid>}}` pointer, and the proxy injects the real secret in flight.
 
-| Skill | What it does |
+## Quick start (any AI coding agent)
+```
+git clone https://github.com/postmanlabs/postman-passport-setup
+cd postman-passport-setup
+# start your agent here (Claude Code, Codex, Cursor, Copilot, Gemini CLI, …) and type:
+setup passport
+```
+The agent reads `AGENTS.md`, asks **local Docker or AWS**, and runs the matching guide.
+No agent? Open the guide and follow it by hand.
+
+| Guide | What it does |
 |---|---|
-| [`passport-local-docker`](skills/passport-local-docker/SKILL.md) | Proxy + disposable HashiCorp Vault in Docker on your machine |
-| [`passport-aws-single-instance`](skills/passport-aws-single-instance/SKILL.md) | Proxy on one EC2 instance (stock Amazon Linux 2023, no custom AMI), local Vault, CloudFront HTTPS management, read-only preflight, full cleanup |
+| [`guides/local-docker.md`](guides/local-docker.md) | Proxy + disposable HashiCorp Vault in Docker on your machine |
+| [`guides/aws-single-instance.md`](guides/aws-single-instance.md) | Proxy on one EC2 instance (stock Amazon Linux 2023), local Vault, CloudFront HTTPS management, read-only preflight, full cleanup |
 
 ## Prerequisites
 - A Passport Cloud team and a **registry key** (Org Settings → Registry; needs admin).
-- Docker (local skill) or an AWS account + CLI profile (AWS skill).
+- Docker (local) or an AWS account + CLI profile (AWS).
 - `openssl`, `curl`, `jq`, `node`.
-
-## Install (Claude Code)
-```
-/plugin marketplace add postmanlabs/postman-passport-setup
-/plugin install passport-proxy-setup@passport-proxy-setup
-```
-Then ask: *"set up a Passport proxy on AWS"* or *"run Passport locally in Docker"*.
-Without Claude Code, open the `SKILL.md` and follow it by hand.
 
 ## Safety
 Secrets never go in chat, user-data or logs; every AWS change is confirmed first; teardown only runs when you say so.
-See each skill's "Safety notes".
 
 ## Layout
 ```
-skills/<skill>/SKILL.md      steps + ground rules
-skills/<skill>/reference/    troubleshooting, MDM-managed Macs
-skills/<skill>/scripts/      preflight.sh, passport-api.js
-skills/<skill>/templates/    user-data, CloudFront
+AGENTS.md                 entry point for any agent (CLAUDE.md, GEMINI.md, .cursor/, .github/ are one-line shims)
+guides/                   step-by-step guides + reference/ (troubleshooting, MDM Macs)
+scripts/                  preflight.sh, passport-api.js
+templates/                user-data, CloudFront
+.claude-plugin/, skills/  optional Claude Code plugin wrapper (same files, no duplication)
+```
+
+## Claude Code plugin (optional)
+```
+/plugin marketplace add postmanlabs/postman-passport-setup
+/plugin install passport-proxy-setup@passport-proxy-setup
 ```

@@ -1,8 +1,3 @@
----
-name: passport-aws-single-instance
-description: Deploy and verify a Postman Passport proxy on a single EC2 instance in the user's own AWS account, using stock Amazon Linux 2023 (no custom AMI) — Docker, the published proxy image, a local HashiCorp Vault, and CloudFront for HTTPS management — then prove a secret resolves end to end and clean up. Use when asked to set up, deploy or test a Passport proxy on AWS.
----
-
 # Postman Passport proxy on AWS (single EC2 instance)
 
 A from-scratch walkthrough that deploys the **Passport Proxy on a single EC2
@@ -30,19 +25,18 @@ comfort with a terminal, Docker and the AWS CLI.
 > the boot log, inline SSM policy, HTTPS-only management URL, secret-name
 > collisions) are already folded into the steps below.
 
-## If an AI agent (e.g. Claude Code) is running this skill for you
+## If an AI coding agent is running this guide for you
 
-Follow this skill literally and **do every step yourself**. `$SKILL_DIR` below means the directory that contains this `SKILL.md`; `scripts/` and `templates/` live there.
+Follow this guide literally and **do every step yourself**. `$REPO` below means the absolute path of this repository's root (the folder containing `AGENTS.md`); `scripts/` and `templates/` live there. Substitute the real path — each command runs in a fresh shell.
 
-**Context isolation:** work from this skill's own files only (this `SKILL.md`, its
-`reference/`, `scripts/` and `templates/`). Do not pull in context from elsewhere
-— no other repos, notes, memory, project instructions or other skills. If something
-is missing here, ask the user instead of looking elsewhere.
+**Context isolation:** work from this repository's guide files only (this guide, `guides/reference/`,
+`scripts/` and `templates/`). Do not pull in context from elsewhere — no other repos, notes, memory or
+unrelated instructions. If something is missing here, ask the user instead of looking elsewhere.
 
 Only stop for things that truly need the human:
 
-- **Human-only inputs:** the registry key (have them save it with
-  `! mkdir -p /tmp/pp-aws && printf '%s' '<key>' > /tmp/pp-aws/registry-key`
+- **Human-only inputs:** the registry key (have them save it in their own terminal with
+  `mkdir -p /tmp/pp-aws && printf '%s' '<key>' > /tmp/pp-aws/registry-key`
   so it never enters chat; each agent command runs in a fresh shell, so read
   it from that file instead of relying on `export`), the AWS profile/region
   choice, browser approvals (`passport login`), and creating the Passport team
@@ -50,14 +44,14 @@ Only stop for things that truly need the human:
 - **Ask before every AWS change.** Show the exact commands of a block (steps
   3–5) with real values and get one "yes" per block. Read-only commands run
   freely. Never ask for AWS root credentials or long-lived keys in chat — use
-  the user's existing CLI profile (`! aws configure --profile <name>` if they
+  the user's existing CLI profile (`aws configure --profile <name>` in their own terminal if they
   need one).
 - **Show login links on their own line**, as a full `https://` URL with the
   confirmation code. If it expires, restart `login` and give a fresh one.
 - **Check for MDM before anything else:**
   `test -f "/Library/Managed Preferences/com.postman.passport.plist" && echo MDM`.
   If it exists, this Mac forces the host CLI to the corporate proxy, silently
-  ignoring `--management-url`/`--proxy-url`. Use the **MDM guide (`reference/mdm-macs.md`)** for every
+  ignoring `--management-url`/`--proxy-url`. Use the **MDM guide (`guides/reference/aws-mdm-macs.md`)** for every
   CLI command (the host `passport` is only useful for `auth status`). If
   `passport login` output says `(from macOS managed plist)`, switch to the
   appendix immediately and use its callback forwarder (A.3) *before* asking the
@@ -149,7 +143,7 @@ check and exits non-zero if anything is wrong. Run it after step 2 (it checks
 that the registry key file exists) and again whenever you change `NAME`.
 
 ```bash
-cp "$SKILL_DIR/scripts/preflight.sh" /tmp/pp-aws/preflight.sh
+cp "$REPO/scripts/preflight.sh" /tmp/pp-aws/preflight.sh
 NAME=$NAME bash /tmp/pp-aws/preflight.sh            # optional arg: instance type, default t3.small
 ```
 
@@ -213,7 +207,7 @@ it at *your* proxy in step 7, not the production one.
 > against your org's *managed* production endpoints, ignoring any
 > `--management-url`/`--proxy-url` — with no flag to override. If you see
 > `setup` log endpoints you didn't ask for, that's this. Skip to the **MDM
-> appendix** at the end of this skill instead of continuing linearly.
+> appendix** at the end of this guide instead of continuing linearly.
 
 ### 1.1 Confirm you have a team
 
@@ -266,7 +260,7 @@ Inputs (choose, or use the defaults and say so):
 |---|---|
 | Region | the profile's default |
 | VPC / subnet | the **default VPC** and one of its **public** subnets (`MapPublicIpOnLaunch=true`, route `0.0.0.0/0 → igw-…`) |
-| Client CIDR | your current public IP `/32` — `curl -s https://checkip.amazonaws.com` (MDM guide (`reference/mdm-macs.md`): the container egresses from the same IP) |
+| Client CIDR | your current public IP `/32` — `curl -s https://checkip.amazonaws.com` (MDM guide (`guides/reference/aws-mdm-macs.md`): the container egresses from the same IP) |
 | Instance type | `t3.small` (x86_64) — `t3.micro` is too tight for two containers |
 | SSH | none (use SSM) |
 
@@ -374,8 +368,8 @@ Its ~3-minute deploy overlaps the instance boot.
 
 ```bash
 cd /tmp/pp-aws
-cp "$SKILL_DIR/templates/cloudfront-404.js" .
-cp "$SKILL_DIR/templates/cloudfront-dist.json.tmpl" .
+cp "$REPO/templates/cloudfront-404.js" .
+cp "$REPO/templates/cloudfront-dist.json.tmpl" .
 ETAG=$(aws cloudfront create-function --name passport-proxy-$NAME-404 --function-config Comment=passport-404,Runtime=cloudfront-js-2.0 \
   --function-code fileb://cloudfront-404.js --query ETag --output text); st CF_FUNCTION passport-proxy-$NAME-404
 FN=$(aws cloudfront publish-function --name passport-proxy-$NAME-404 --if-match $ETAG --query 'FunctionSummary.FunctionMetadata.FunctionARN' --output text)
@@ -404,7 +398,7 @@ team ID, hostnames and secret *names*.
 ```bash
 cd /tmp/pp-aws
 ORG="<org_... from step 1.1>"
-cp "$SKILL_DIR/templates/user-data.tmpl" user-data.tmpl
+cp "$REPO/templates/user-data.tmpl" user-data.tmpl
 sed -e "s|__REGION__|$AWS_REGION|" -e "s|__PREFIX__|passport/$NAME|" -e "s|__ORG__|$ORG|" -e "s|__SANS__|$HOST,$EIP,localhost|" \
   user-data.tmpl > user-data.sh
 grep -nE 'sk_|PRIVATE KEY' user-data.sh && echo "SECRET IN USER-DATA — STOP" || echo "user-data has no secrets"
@@ -509,7 +503,7 @@ session's token authenticates the same calls. The token is read from
 `~/.passport` normally, `~/passport-cli-dl/.passport` on the MDM path.
 
 ```bash
-cp "$SKILL_DIR/scripts/passport-api.js" /tmp/pp-aws/passport-api.js
+cp "$REPO/scripts/passport-api.js" /tmp/pp-aws/passport-api.js
 ```
 
 ```bash
@@ -672,7 +666,7 @@ Output: `{"ok":true,"sha256":"a91317c5…a1f8"}`, the sha256 of the real secret
 
 1. **You only hold a pointer.** The header you sent is
    `x-key: {{vault:<uuid>}}`. The UUID names a secret; it isn't the secret.
-   **Your machine, shell history and this skill never contain the value.**
+   **Your machine, shell history and this guide never contain the value.**
 2. **Your identity is a short-lived client cert.** `passport setup` issued
    `cert.pem` (about 5 min). It encodes *which* references you may use, on
    *which* method, host and path (`GET localhost/echo`). That's the grant from
@@ -763,7 +757,7 @@ done
 rm -rf /tmp/pp-aws
 ```
 
-MDM guide (`reference/mdm-macs.md`) users also run: `docker rm -f pp-cli-linux; rm -rf ~/passport-cli-dl; pkill -f cb-forward.js`.
+MDM guide (`guides/reference/aws-mdm-macs.md`) users also run: `docker rm -f pp-cli-linux; rm -rf ~/passport-cli-dl; pkill -f cb-forward.js`.
 
 If you wish to **keep** the keys (so a future proxy can reuse them and old
 references keep working), skip 10.5 and the registration delete in 10.1, and
@@ -775,8 +769,8 @@ Manager (`passport/$NAME/ca-key`, `reference-key`) anyway.
 
 ## Troubleshooting, MDM Macs, safety
 
-- Troubleshooting table: `reference/troubleshooting.md`
-- MDM-managed Macs (run the CLI in a Linux container): `reference/mdm-macs.md`
+- Troubleshooting table: `guides/reference/aws-troubleshooting.md`
+- MDM-managed Macs (run the CLI in a Linux container): `guides/reference/aws-mdm-macs.md`
 
 ## Safety notes
 

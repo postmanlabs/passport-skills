@@ -6,13 +6,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: shellcheck
-        run: shellcheck --severity=warning skills/*/scripts/*.sh
+        run: shellcheck --severity=warning scripts/*.sh
       - name: JS syntax
-        run: for f in skills/*/scripts/*.js skills/*/templates/*.js; do node --check "$f"; done
+        run: for f in scripts/*.js templates/*.js; do node --check "$f"; done
       - name: JSON validity
         run: |
           jq empty .claude-plugin/plugin.json .claude-plugin/marketplace.json
-          jq empty skills/*/templates/*.json.tmpl 2>/dev/null || true
+          jq empty templates/*.json.tmpl 2>/dev/null || true
+      - name: Entry points exist
+        run: test -f AGENTS.md -a -f guides/local-docker.md -a -f guides/aws-single-instance.md
       - name: SKILL.md frontmatter
         run: |
           for f in skills/*/SKILL.md; do
