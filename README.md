@@ -1,4 +1,4 @@
-# passport-proxy-setup
+# postman-passport-setup
 
 > **Note:** the AWS skill creates billable resources.
 
