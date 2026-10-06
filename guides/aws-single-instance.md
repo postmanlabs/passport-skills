@@ -23,7 +23,9 @@ comfort with a terminal, Docker and the AWS CLI.
 > registration, `setup`, `passport request` and the 8.1 `curl` all produced the
 > expected sha256. Fixes found in that run (key file permissions, no token in
 > the boot log, inline SSM policy, HTTPS-only management URL, secret-name
-> collisions) are already folded into the steps below.
+> collisions) are already folded into the steps below. *Note:* that run used
+> the template plus live fixes; the committed `templates/user-data.tmpl` (which
+> now also makes `trust.pem` readable) has not yet booted unchanged end to end.
 
 ## If an AI coding agent is running this guide for you
 
@@ -54,7 +56,7 @@ Only stop for things that truly need the human:
   ignoring `--management-url`/`--proxy-url`. Use the **MDM guide (`guides/reference/aws-mdm-macs.md`)** for every
   CLI command (the host `passport` is only useful for `auth status`). If
   `passport login` output says `(from macOS managed plist)`, switch to the
-  appendix immediately and use its callback forwarder (A.3) *before* asking the
+  MDM guide immediately and use its callback forwarder (A.3) *before* asking the
   user to approve — never ask them to paste a callback URL.
 - **Do the Passport Cloud steps yourself via the API (step 6)** instead of
   asking the user to click through the web UI, if they've told you to do it end
@@ -95,8 +97,8 @@ Only stop for things that truly need the human:
 - An **AWS account** and the AWS CLI v2 configured with a profile that has the
   permissions in the table below. Sandbox shortcut: `PowerUserAccess` **plus**
   the IAM actions listed (PowerUser has no IAM).
-- Docker Desktop (or another Docker daemon) on your machine — only for the MDM
-  appendix.
+- Docker Desktop (or another Docker daemon) on your machine — only for the MDM guide
+  (`guides/reference/aws-mdm-macs.md`).
 - A Passport Cloud account/team — sign up at
   [https://app.usepassport.ai](https://app.usepassport.ai) if you don't have one.
 - A Passport **registry key** (step 2).
@@ -135,7 +137,7 @@ aws sts get-caller-identity --query '[Account,Arn]' --output text
 > zsh doesn't word-split it. Always export `AWS_PROFILE`/`AWS_REGION`. Don't
 > put a bare `=====` line in a command either (zsh `=cmd` expansion).
 
-### 0.1 Preflight (read-only — run before creating anything)
+### 0.1 Preflight (read-only — run after step 2, before step 3)
 
 Checks everything it can **without creating or changing anything**, so problems
 show up now rather than halfway through step 3. It reports ✅ / ❌ / · per
@@ -206,8 +208,8 @@ it at *your* proxy in step 7, not the production one.
 > **On an MDM-managed Mac**, `passport login` will immediately auto-run `setup`
 > against your org's *managed* production endpoints, ignoring any
 > `--management-url`/`--proxy-url` — with no flag to override. If you see
-> `setup` log endpoints you didn't ask for, that's this. Skip to the **MDM
-> appendix** at the end of this guide instead of continuing linearly.
+> `setup` log endpoints you didn't ask for, that's this. Switch to the **MDM guide**
+> (`guides/reference/aws-mdm-macs.md`) instead of continuing linearly.
 
 ### 1.1 Confirm you have a team
 
@@ -225,7 +227,7 @@ team"). Once the team exists, re-run `passport login`.
 prints it on the `org` line:
 
 ```bash
-passport auth status | awk '$1=="org"{print $2}'     # → ORG (MDM: use the appendix's command)
+passport auth status | awk '$1=="org"{print $2}'     # → ORG (MDM: see the MDM guide, A.3)
 ```
 
 ---
@@ -271,8 +273,14 @@ ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
 MYIP=$(curl -s https://checkip.amazonaws.com); CLIENT_CIDR="$MYIP/32"
 
 VPC=$(aws ec2 describe-vpcs --filters Name=is-default,Values=true --query 'Vpcs[0].VpcId' --output text)
-SUBNET=$(aws ec2 describe-subnets --filters Name=vpc-id,Values=$VPC Name=map-public-ip-on-launch,Values=true \
-  --query 'Subnets[0].SubnetId' --output text)
+SUBNET=""          # first auto-public-IP subnet whose 0.0.0.0/0 route goes to an internet gateway (same rule as preflight)
+for S in $(aws ec2 describe-subnets --filters Name=vpc-id,Values=$VPC Name=map-public-ip-on-launch,Values=true --query 'Subnets[].SubnetId' --output text); do
+  GW=$(aws ec2 describe-route-tables --filters Name=association.subnet-id,Values=$S --query 'RouteTables[0].Routes[?DestinationCidrBlock==`0.0.0.0/0`].GatewayId' --output text)
+  { [ -z "$GW" ] || [ "$GW" = None ]; } && GW=$(aws ec2 describe-route-tables --filters Name=vpc-id,Values=$VPC Name=association.main,Values=true \
+    --query 'RouteTables[0].Routes[?DestinationCidrBlock==`0.0.0.0/0`].GatewayId' --output text)
+  case "$GW" in igw-*) SUBNET=$S; break;; esac
+done
+[ -n "$SUBNET" ] || echo "NO PUBLIC SUBNET — stop and pick one (see preflight)"
 AMI=$(aws ssm get-parameter --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 \
   --query Parameter.Value --output text)
 echo "vpc=$VPC subnet=$SUBNET ami=$AMI client=$CLIENT_CIDR"
@@ -292,8 +300,9 @@ aws ec2 authorize-security-group-ingress --group-id $SG --ip-permissions \
 read ALLOC EIP < <(aws ec2 allocate-address --domain vpc --query '[AllocationId,PublicIp]' --output text \
   --tag-specifications "ResourceType=elastic-ip,Tags=[{Key=Name,Value=passport-proxy-$NAME},{Key=project,Value=passport}]")
 st ALLOC $ALLOC; st EIP $EIP
-HOST=ec2-${EIP//./-}.$AWS_REGION.compute.amazonaws.com      # us-east-1: ec2-<ip>.compute-1.amazonaws.com
-st HOST $HOST
+if [ "$AWS_REGION" = us-east-1 ]; then PROXY_HOST=ec2-${EIP//./-}.compute-1.amazonaws.com
+else PROXY_HOST=ec2-${EIP//./-}.$AWS_REGION.compute.amazonaws.com; fi
+st PROXY_HOST $PROXY_HOST
 ```
 
 > **Never open 8081 to `0.0.0.0/0`.** It's the management plane (`/ca.pem`,
@@ -373,7 +382,7 @@ cp "$REPO/templates/cloudfront-dist.json.tmpl" .
 ETAG=$(aws cloudfront create-function --name passport-proxy-$NAME-404 --function-config Comment=passport-404,Runtime=cloudfront-js-2.0 \
   --function-code fileb://cloudfront-404.js --query ETag --output text); st CF_FUNCTION passport-proxy-$NAME-404
 FN=$(aws cloudfront publish-function --name passport-proxy-$NAME-404 --if-match $ETAG --query 'FunctionSummary.FunctionMetadata.FunctionARN' --output text)
-sed -e "s|__CALLER_REF__|passport-proxy-$NAME-$(date +%s)|" -e "s|__NAME__|$NAME|" -e "s|__HOSTNAME__|$HOST|" -e "s|__FN_ARN__|$FN|" \
+sed -e "s|__CALLER_REF__|passport-proxy-$NAME-$(date +%s)|" -e "s|__NAME__|$NAME|" -e "s|__HOSTNAME__|$PROXY_HOST|" -e "s|__FN_ARN__|$FN|" \
   cloudfront-dist.json.tmpl > cf-dist.json
 read DIST CFDOMAIN < <(aws cloudfront create-distribution --distribution-config file://cf-dist.json --query 'Distribution.[Id,DomainName]' --output text)
 st CF_DIST $DIST; st CF_DOMAIN $CFDOMAIN
@@ -399,7 +408,7 @@ team ID, hostnames and secret *names*.
 cd /tmp/pp-aws
 ORG="<org_... from step 1.1>"
 cp "$REPO/templates/user-data.tmpl" user-data.tmpl
-sed -e "s|__REGION__|$AWS_REGION|" -e "s|__PREFIX__|passport/$NAME|" -e "s|__ORG__|$ORG|" -e "s|__SANS__|$HOST,$EIP,localhost|" \
+sed -e "s|__REGION__|$AWS_REGION|" -e "s|__PREFIX__|passport/$NAME|" -e "s|__ORG__|$ORG|" -e "s|__SANS__|$PROXY_HOST,$EIP,localhost|" \
   user-data.tmpl > user-data.sh
 grep -nE 'sk_|PRIVATE KEY' user-data.sh && echo "SECRET IN USER-DATA — STOP" || echo "user-data has no secrets"
 ```
@@ -408,7 +417,7 @@ grep -nE 'sk_|PRIVATE KEY' user-data.sh && echo "SECRET IN USER-DATA — STOP" |
 > forever with `PASSPORT_PROXY_PRIVATE_KEY_PATH: open /opt/passport/ca.pem: permission denied`.
 >
 > `PASSPORT_PROXY_DATAPLANE_CERT_SANS` lists the names clients use for `:8443`.
-> The CLI connects to `$EIP`/`$HOST`, so both must be there (`localhost` is kept
+> The CLI connects to `$EIP`/`$PROXY_HOST`, so both must be there (`localhost` is kept
 > for the in-instance test traffic).
 >
 > `ca-bundle.crt` is the Amazon Linux 2023 path (verified). Appending the system
@@ -464,7 +473,7 @@ Management/data-plane sanity (read-only; no cert needed):
 
 ```bash
 openssl x509 -in /tmp/pp-aws/proxy-ca.pem -noout -subject
-curl -s -m 10 -o /dev/null -D - --proxy https://$HOST:8443 --proxy-insecure https://example.com/ | head -3   # expect 407 (client cert required)
+curl -s -m 10 -o /dev/null -D - --proxy https://$PROXY_HOST:8443 --proxy-insecure https://example.com/ | head -3   # expect 407 (client cert required)
 ```
 
 ---
@@ -475,7 +484,7 @@ You can do this in the web UI or through the API. The API path is below; the
 UI path is:
 
 - **Team Settings → Access Proxies → Create Access Proxy** with
-  Proxy URL `https://<HOST>:8443` (the `ec2-…` name, or the EIP), Management
+  Proxy URL `https://<PROXY_HOST>:8443` (the `ec2-…` name, or the EIP), Management
   Host `https://<CF_DOMAIN>` (the CloudFront domain from 3.4), and Proxy public key = contents of
   `/tmp/pp-aws/reference-public-key.pem`.
 - **Home → Create Namespace → Add Resources → Manual**: Method `GET`, Host
@@ -522,7 +531,7 @@ api GET /api/v2/tenant/config | jq -c '.body.data[]|{proxyId,proxyEndpoint,isDef
 
 ```bash
 # 6.1a register the proxy, then confirm the stored key matches your local one
-jq -n --rawfile k reference-public-key.pem --arg n "passport-proxy-$NAME" --arg e "https://$HOST:8443" --arg m "https://$CF_DOMAIN" \
+jq -n --rawfile k reference-public-key.pem --arg n "passport-proxy-$NAME" --arg e "https://$PROXY_HOST:8443" --arg m "https://$CF_DOMAIN" \
   '{encryptionMode:"B",publicKey:$k,proxyName:$n,proxyEndpoint:$e,managementHostUrl:$m,isDefault:true}' > register-body.json
 api POST /api/v2/tenant/config @register-body.json | tee register-out.json | jq -c '{status,proxyId:.body.data.proxyId}'
 PROXY_ID=$(jq -r .body.data.proxyId register-out.json); st PROXY_ID $PROXY_ID
@@ -570,11 +579,11 @@ for anything real, run a properly initialised Vault.
 ```bash
 source /tmp/pp-aws/state.env; cd /tmp/pp-aws; export PASSPORT_DIR=~/.passport    # MDM: ~/passport-cli-dl/.passport
 api() { node /tmp/pp-aws/passport-api.js "$@"; }
-USER=$(node -e 'const fs=require("fs"),p=require("path");const rc=JSON.parse(fs.readFileSync(p.join(process.env.PASSPORT_DIR,"passportrc"),"utf8"));console.log(JSON.parse(Buffer.from(rc.login._profiles[0].workos.accessToken.split(".")[1],"base64url")).sub)')
+PP_USER=$(node -e 'const fs=require("fs"),p=require("path");const rc=JSON.parse(fs.readFileSync(p.join(process.env.PASSPORT_DIR,"passportrc"),"utf8"));console.log(JSON.parse(Buffer.from(rc.login._profiles[0].workos.accessToken.split(".")[1],"base64url")).sub)')
 NS=$(api POST /api/v1/namespaces "$(jq -nc --arg n "passport-proxy-$NAME-e2e" '{name:$n,description:"Passport proxy e2e test"}')" | jq -r '.body.data.id')
 REF=$(api POST /api/v2/secret-references "$(jq -nc --arg ns "$NS" '{namespaceId:$ns,name:"demo",vaultType:"hashicorp",vaultKey:"test-key"}')" | jq -r '.body.data.id')
 EP=$(api POST /api/v2/resource-endpoints "$(jq -nc --arg ns "$NS" --arg r "$REF" '{namespaceId:$ns,method:"GET",host:"localhost",path:"/echo",secrets:[{label:"x-key",secretReferenceId:$r}]}')" | jq -r '.body.data.id')
-GR=$(api POST /api/v2/access-grants "$(jq -nc --arg u "$USER" --arg ns "$NS" --arg e "$EP" '{userId:$u,namespaceId:$ns,endpointIds:[$e],reason:"passport proxy aws e2e",validity:1}')" | jq -r '.body.data[0].id')
+GR=$(api POST /api/v2/access-grants "$(jq -nc --arg u "$PP_USER" --arg ns "$NS" --arg e "$EP" '{userId:$u,namespaceId:$ns,endpointIds:[$e],reason:"passport proxy aws e2e",validity:1}')" | jq -r '.body.data[0].id')
 st NS $NS; st REF $REF; st EP $EP; st GR $GR; cat state.env | tail -4
 ```
 
@@ -586,10 +595,10 @@ Cleanup order (step 10) is: grant → endpoint → secret reference → namespac
 
 ```bash
 source /tmp/pp-aws/state.env
-passport setup --management-url https://$CF_DOMAIN --proxy-url https://$HOST:8443
+passport setup --management-url https://$CF_DOMAIN --proxy-url https://$PROXY_HOST:8443
 ```
 
-On an MDM Mac use the appendix (A.4) instead — same flags.
+On an MDM Mac use the MDM guide (A.4) instead — same flags.
 
 > **Why CloudFront:** the CLI rejects a plain-HTTP management URL on a public
 > address (`invalid management URL: expected an HTTPS origin (or http://localhost
@@ -632,7 +641,7 @@ onhost 'docker logs pp-echo 2>&1 | tail -1'              # onhost is defined in 
 
 > `{{vault:...}}` **must** contain the secret reference's UUID, not its
 > friendly name — anything else streams through unsubstituted with no error.
-> MDM Mac: run the request through `pp-cli-linux` (appendix A.4).
+> MDM Mac: run the request through `pp-cli-linux` (MDM guide, A.4).
 
 If you see a sha256 (not the literal `{{vault:...}}`) and it matches, the
 secret was resolved and injected by the proxy running **on EC2** — **a complete,
@@ -779,8 +788,9 @@ Manager (`passport/$NAME/ca-key`, `reference-key`) anyway.
   hashes instead (as step 8 does).
 - The Vault here is a disposable, in-memory **dev** server on a single
   instance — fine for this test, never for anything you care about keeping.
-- 8443 and 8081 are open **only** to your `/32`. If your IP changes, update the
-  security group; never widen it to `0.0.0.0/0`.
+- 8443 is open **only** to your `/32`, and 8081 **only** to CloudFront's
+  origin-facing prefix list. If your IP changes, update the 8443 rule; never
+  widen either to `0.0.0.0/0`.
 - This setup creates real AWS resources (instance, EIP, role, security group,
   secrets) that **cost money while they exist** and real objects in your
   Passport Cloud team — clean them up (step 10) once you're done, especially on

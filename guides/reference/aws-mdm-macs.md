@@ -82,7 +82,7 @@ shows `Logged in successfully.` Stop the forwarder afterwards:
 ```bash
 source /tmp/pp-aws/state.env
 pp() { docker exec -e PASSPORT_DIR=/cli/.passport pp-cli-linux ./passport "$@"; }   # a function, not a string: zsh won't split a stored command
-pp setup --management-url https://$CF_DOMAIN --proxy-url https://$HOST:8443 --no-daemon
+pp setup --management-url https://$CF_DOMAIN --proxy-url https://$PROXY_HOST:8443 --no-daemon
 pp whoami
 pp request "https://localhost:9443/echo" -H "x-key: {{vault:$REF}}"
 ```

@@ -19,7 +19,7 @@ comfort with a terminal and Docker.
 > image pull, proxy boot, local HashiCorp Vault resolution, cert issuance,
 > and a real secret delivered through the proxy, confirmed by an
 > independently-computed sha256. The one path *not* covered by the main flow
-> is an MDM-managed Mac — see the appendix at the end if that's you.
+> is an MDM-managed Mac — see `guides/reference/local-mdm-macs.md` if that's you.
 
 ## If an AI coding agent is running this guide for you
 
