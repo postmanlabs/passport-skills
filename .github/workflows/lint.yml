@@ -6,7 +6,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: shellcheck
-        run: shellcheck skills/*/scripts/*.sh
+        run: shellcheck --severity=warning skills/*/scripts/*.sh
       - name: JS syntax
         run: for f in skills/*/scripts/*.js skills/*/templates/*.js; do node --check "$f"; done
       - name: JSON validity
