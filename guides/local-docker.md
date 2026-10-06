@@ -340,20 +340,29 @@ WANT=$(openssl pkey -pubin -in reference-public-key.pem -outform DER | openssl d
 GOT=$(api GET /api/v2/tenant/config | jq -r --arg p "$PROXY_ID" '.body.data[]|select(.proxyId==$p).publicKey' | openssl pkey -pubin -outform DER | openssl dgst -sha256 | awk '{print $NF}')
 [ "$WANT" = "$GOT" ] && echo "key match" || echo "KEY MISMATCH"
 
-# 5.2 namespace, secret reference, endpoint (host WITHOUT port, see gotcha above)
-USER=$(node -e 'const fs=require("fs"),os=require("os"),p=require("path");const rc=JSON.parse(fs.readFileSync(p.join(os.homedir(),".passport","passportrc"),"utf8"));console.log(JSON.parse(Buffer.from(rc.login._profiles[0].workos.accessToken.split(".")[1],"base64url")).sub)')
+# 5.2 namespace, resource group, secret reference, endpoint (host WITHOUT port, see gotcha above)
+PP_USER=$(node -e 'const fs=require("fs"),os=require("os"),p=require("path");const rc=JSON.parse(fs.readFileSync(p.join(process.env.PASSPORT_DIR||p.join(os.homedir(),".passport"),"passportrc"),"utf8"));console.log(JSON.parse(Buffer.from(rc.login._profiles[0].workos.accessToken.split(".")[1],"base64url")).sub)')
 NS=$(api POST /api/v1/namespaces '{"name":"passport-proxy-local-dev-e2e","description":"Passport proxy e2e test"}' | jq -r '.body.data.id')
+RG=$(api POST /api/v1/namespaces/$NS/resource-groups '{"name":"localhost","description":"Passport proxy e2e test","source":"manual"}' | jq -r '.body.data.id')
 REF=$(api POST /api/v2/secret-references "$(jq -nc --arg ns "$NS" '{namespaceId:$ns,name:"demo",vaultType:"hashicorp",vaultKey:"test-key"}')" | jq -r '.body.data.id')
-EP=$(api POST /api/v2/resource-endpoints "$(jq -nc --arg ns "$NS" --arg r "$REF" '{namespaceId:$ns,method:"GET",host:"localhost",path:"/echo",secrets:[{label:"x-key",secretReferenceId:$r}]}')" | jq -r '.body.data.id')
+EP=$(api POST /api/v2/resource-endpoints "$(jq -nc --arg ns "$NS" --arg r "$REF" --arg g "$RG" '{namespaceId:$ns,method:"GET",host:"localhost",path:"/echo",secrets:[{label:"x-key",secretReferenceId:$r}],resourceGroupIds:[$g]}')" | jq -r '.body.data.id')
 
 # 5.3 grant to yourself
-GR=$(api POST /api/v2/access-grants "$(jq -nc --arg u "$USER" --arg ns "$NS" --arg e "$EP" '{userId:$u,namespaceId:$ns,endpointIds:[$e],reason:"passport proxy local e2e",validity:1}')" | jq -r '.body.data[0].id')
-printf 'NS=%s\nREF=%s\nEP=%s\nGR=%s\n' $NS $REF $EP $GR | tee ids.env
+GR=$(api POST /api/v2/access-grants "$(jq -nc --arg u "$PP_USER" --arg ns "$NS" --arg e "$EP" '{userId:$u,namespaceId:$ns,endpointIds:[$e],reason:"passport proxy local e2e",validity:1}')" | jq -r '.body.data[0].id')
+printf 'NS=%s\nRG=%s\nREF=%s\nEP=%s\nGR=%s\n' $NS $RG $REF $EP $GR | tee ids.env
 ```
+
+> **The resource group is what makes it visible in the web UI.** The namespace
+> page lists *resource groups*, then the endpoints inside each one. An endpoint
+> created without `resourceGroupIds` works fine through the proxy but never
+> shows up in Passport Cloud. `source:"manual"` is what the web UI's **Manual**
+> flow uses. To fix an endpoint created earlier without a group, create the
+> group as above, then attach it (a `PUT` changes only the fields you send):
+> `api PUT /api/v2/resource-endpoints/$EP "$(jq -nc --arg g "$RG" '{resourceGroupIds:[$g]}')"`
 
 `ids.env` keeps the IDs for step 7 (`REF`) and for cleanup. Cleanup deletes, in
 order: `api DELETE /api/v2/access-grants/$GR`, `/api/v2/resource-endpoints/$EP`,
-`/api/v2/secret-references/$REF`, `/api/v1/namespaces/$NS`.
+`/api/v1/resource-groups/$RG`, `/api/v2/secret-references/$REF`, `/api/v1/namespaces/$NS`.
 
 ---
 
