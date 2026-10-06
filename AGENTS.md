@@ -23,7 +23,8 @@ When the user says **"setup passport"** (or similar: "set up the Passport proxy"
   instead. Never put a secret in user-data, a commit, or chat.
 - **Never tear anything down** until the user explicitly says so.
 - **Check existing state first** and reuse it; record every resource you create so cleanup is exact.
-- Check for an MDM-managed Mac before anything else (the guides say how) and use the MDM reference if so.
+- If CLI output says `(from macOS managed plist)` (or the other MDM signs the guides list), switch to that
+  guide's MDM reference — don't probe the filesystem for it.
 
 ## Layout
 - `guides/` — the step-by-step guides; `guides/reference/` — troubleshooting and MDM-Mac details

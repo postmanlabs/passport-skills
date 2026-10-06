@@ -40,17 +40,18 @@ human:
   including the contents of `reference-public-key.pem`.
 - **Show login links on their own line**, as a full `https://` URL with the
   confirmation code. If it expires, restart `login` and give a fresh one.
-- **MDM Mac:** if `passport login` output says `(from macOS managed plist)`,
-  switch to the MDM guide (`guides/reference/local-mdm-macs.md`) immediately and use its callback forwarder
-  (A.3) *before* asking the user to approve — never ask them to paste a
-  callback URL.
-- **Check for MDM before anything else:**
-  `test -f "/Library/Managed Preferences/com.postman.passport.plist" && echo MDM`.
-  If it exists, this Mac forces the CLI to the corporate proxy, silently
-  ignoring `--management-url`/`--proxy-url`. Symptom if you miss it: `setup`
-  returns `403 ... teamId "org_..." is not authorized for this deployment`
-  while the local proxy logs nothing. Use the **MDM guide (`guides/reference/local-mdm-macs.md`)** for every CLI
-  command (the host `passport` is only useful for `auth status`).
+- **MDM-managed Mac — detect it from the CLI, don't probe for it.** Switch to
+  the MDM guide (`guides/reference/local-mdm-macs.md`) as soon as any of these appears:
+  - `passport login` or `setup` output says `(from macOS managed plist)`;
+  - `setup` fails with `403 ... teamId "org_..." is not authorized for this
+    deployment` while the proxy logs no request;
+  - `passport whoami` says `Managed Passport credentials could not be verified`.
+  On such a Mac the CLI is pinned to the organisation's proxy and silently
+  ignores `--management-url`/`--proxy-url`, so run every CLI command through
+  the MDM guide's container (the host `passport` is only useful for
+  `auth status`). The host login that revealed it is harmless; log in again
+  inside the container, starting its callback forwarder (A.3) *before* asking
+  the user to approve — never ask them to paste a callback URL.
 - **Do 5.1–5.3 yourself via the API (step 5.4)** instead of asking the user
   to click through the web UI, if they've told you to do it end to end.
 - **Check existing state first** (containers, network, keys, CLI version)
