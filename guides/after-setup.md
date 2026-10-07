@@ -99,6 +99,16 @@ which one first, in one line.
 > ```
 > The proxy checked each link before it swapped the pointer for the real key.
 >
+> **Run it yourself:** open a **new terminal window**, paste this and press Enter:
+> ```bash
+> export HTTPS_PROXY=http://127.0.0.1:10144
+> export SSL_CERT_FILE=~/.passport/ca.pem
+> curl -sS -H "x-demo-api-key: {{vault:d625f364-3d76-4a14-9db5-b217cbfd3e23}}" https://passport-demo.mock.postman.postman.dev; echo
+> ```
+> You should get the same `"key":"sdfds**************","key_length":19`. No
+> `--proxy`, no certificate flags: the Passport daemon holds your certificate.
+> (If you see `"{{vau…",46`, the `export` lines didn't apply in that window.)
+>
 > **Try it on your own API?** Tell me the URL and how it takes the key (for
 > example `Authorization: Bearer`). You'll store the key yourself through a
 > hidden prompt, never in this chat, and I'll do the rest.
@@ -114,6 +124,21 @@ Rules for this message:
 - **The access chain uses the real IDs:** grant → endpoint (method, host,
   path) → header → secret reference → Vault key, plus the certificate's expiry
   from `passport whoami`. Shorten IDs to 8 characters plus `…`.
+- **"Run it yourself" is mandatory, and you must run it first.** Run that exact
+  block yourself in a clean shell:
+  `env -i HOME=$HOME PATH=/usr/bin:/bin:/usr/local/bin zsh -c '<the block>'`.
+  Give it to the user only if it returned the same result. Use the variant for
+  their platform:
+
+  | User's machine | Block to give |
+  |---|---|
+  | **macOS** (not MDM), after `passport setup` installed the daemon | the block above. New terminal windows already have these variables, and the `export` lines just make that explicit |
+  | **Windows** (PowerShell), after `passport setup` | `$env:HTTPS_PROXY="http://127.0.0.1:10144"; curl.exe -sS -H "x-demo-api-key: {{vault:<REF>}}" https://passport-demo.mock.postman.postman.dev`. `curl.exe` uses the Windows certificate store, so run `passport ca install` first. *Unverified* |
+  | **Linux** | first `passport daemon start` (setup can't install the daemon on Linux), then the block above |
+  | **MDM-managed Mac** | the block above, with `SSL_CERT_FILE=~/passport-cli-dl/.passport/ca.pem`. It needs the daemon container from your MDM reference ("Daemon on an MDM Mac") |
+
+  If the daemon isn't running, give the explicit form ("What I ran") as the
+  thing to copy, and say why.
 - **The proof command.** Show the daemon form (no flags, as above) if the
   daemon is running. Otherwise show the explicit form you actually ran
   (`curl --proxy $PROXY … -H "x-demo-api-key: …" https://passport-demo…`), and

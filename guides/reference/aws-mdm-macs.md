@@ -96,8 +96,40 @@ place of `~/.passport`. The folder is bind-mounted, so your Mac's `curl` can rea
 `cert.pem` and `key.pem`.
 
 **What doesn't apply on this path:**
-- **`passport ca install` and the daemon.** The container CLI is Linux, which
-  supports neither. In step 8.5, report lines 3–4 as "not applicable (MDM
-  container path)", not ✅. Requests use the explicit form.
-- **Renewal.** Nothing renews `cert.pem` in the background. Re-run
-  `pp setup … --no-daemon` when `notAfter` passes.
+- **`passport ca install`.** The container CLI is Linux, which doesn't support
+  it. In step 8.5, report line 3 as "not applicable (MDM container path)".
+- **The daemon** isn't installed by setup here. For the plain-`curl` form, run
+  it in a container (A.5). Otherwise report line 4 as "not applicable".
+- **Renewal.** Without the A.5 daemon, nothing renews `cert.pem` in the
+  background. Re-run `pp setup … --no-daemon` when `notAfter` passes.
+
+### A.5 Daemon on an MDM Mac (plain `curl` from your own terminal)
+
+The proxy is on EC2, so the daemon container doesn't need to share a network
+with it. Run it on a normal bridge network, and publish its port on your Mac's
+**loopback only**, through a small forwarder:
+
+```bash
+REPO=<repo>; . "$REPO/scripts/env.sh"
+cat > ~/passport-cli-dl/daemon-fwd.js << 'EOF'
+require('net').createServer(c=>{const u=require('net').connect(10144,'127.0.0.1');c.pipe(u).pipe(c);c.on('error',()=>u.destroy());u.on('error',()=>c.destroy());}).listen(10145,'0.0.0.0',()=>console.log('fwd 10145->10144'));
+EOF
+docker run -d --name pp-daemon -p 127.0.0.1:10144:10145 -v ~/passport-cli-dl:/cli -w /cli -e PASSPORT_DIR=/cli/.passport node:20 \
+  sh -c "./passport setup --management-url https://$CF_DOMAIN --proxy-url https://$PROXY_HOST:8443 --no-daemon >/cli/daemon-setup.log 2>&1; node /cli/daemon-fwd.js & exec ./passport daemon start --foreground"
+docker exec -e PASSPORT_DIR=/cli/.passport pp-daemon ./passport daemon status     # upstream <PROXY_HOST>:8443 (reachable)
+```
+
+The block to give the user, for a new terminal window:
+
+```bash
+export HTTPS_PROXY=http://127.0.0.1:10144
+export SSL_CERT_FILE=~/passport-cli-dl/.passport/ca.pem
+curl -sS -H "x-demo-api-key: {{vault:<REF>}}" https://passport-demo.mock.postman.postman.dev; echo
+```
+
+Cleanup: `docker rm -f pp-daemon`.
+
+> *Unverified on EC2.* The same pattern is verified for the local setup
+> (`local-mdm-macs.md`, A.5). Here the daemon runs on a bridge network, and
+> your Mac's public IP must be in the 8443 rule. If the daemon reports the
+> upstream as unreachable, check the security group first.
