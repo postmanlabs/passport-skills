@@ -23,7 +23,11 @@ comfort with a terminal and Docker.
 >
 > **Changed 2026-10-07:** the end-to-end test now calls the public Passport
 > demo API (`https://passport-demo.mock.postman.postman.dev`) instead of a local
-> echo server. This flow has not been re-run since that change.
+> echo server. **Verified 2026-10-07** on an MDM Mac (container CLI path, cached
+> proxy image): the proxy reached the demo API with no custom trust bundle, the
+> `/` endpoint matched, both `curl` and `passport request` returned
+> `"key":"sdfds**************","key_length":19`, and the reference kept working
+> after another proxy became the team default.
 
 ## If an AI coding agent is running this guide for you
 
@@ -329,12 +333,26 @@ api GET /api/v2/tenant/config     # list existing proxy registrations
 > **Stale registration:** if an earlier run left a proxy registration with the
 > same endpoint but a different `publicKey` (e.g. `/tmp/pp-local` was wiped and
 > `ref.pem` regenerated), don't reuse it — secret references created under it
-> can't be decrypted by your current key. Register a fresh one below; making
-> it `isDefault:true` flips the old one to non-default. Leave the old one in
-> place unless the user says to delete it.
+> can't be decrypted by your current key. Register a fresh one below. Leave
+> the old one in place unless the user says to delete it.
+
+> **Why the default matters (verified in `passport-service`):** Passport
+> encrypts each new secret reference with the public key of the team's
+> **default** proxy registration. If there's no default, it uses an arbitrary
+> registration. Nothing in the request chooses the proxy. A reference created
+> while another proxy is the default can't be decrypted by yours (`failed to
+> decrypt vault reference`). The key is fixed when the reference is created, so
+> the safe pattern on a team that already has a default is:
+> 1. remember the current default;
+> 2. make your proxy the default;
+> 3. create your references;
+> 4. restore the previous default.
+>
+> Your references keep working, and teammates aren't left on your test proxy.
 
 ```bash
-# 5.1 register the proxy, then confirm the stored key matches your local one
+# 5.1 remember the team's current default, register ours AS the default (references are encrypted for it)
+PREV_DEFAULT=$(api GET /api/v2/tenant/config | jq -r '[.body.data[]|select(.isDefault==true)][0].proxyId // empty')
 jq -n --rawfile k reference-public-key.pem --arg n "passport-proxy-local-dev" --arg e "https://localhost:8443" \
   '{encryptionMode:"B",publicKey:$k,proxyName:$n,proxyEndpoint:$e,managementHostUrl:null,isDefault:true}' > register-body.json
 api POST /api/v2/tenant/config @register-body.json | tee register-out.json | jq -c '{status,proxyId:.body.data.proxyId}'
@@ -352,7 +370,9 @@ EP=$(api POST /api/v2/resource-endpoints "$(jq -nc --arg ns "$NS" --arg r "$REF"
 
 # 5.3 grant to yourself
 GR=$(api POST /api/v2/access-grants "$(jq -nc --arg u "$PP_USER" --arg ns "$NS" --arg e "$EP" '{userId:$u,namespaceId:$ns,endpointIds:[$e],reason:"passport proxy local e2e",validity:1}')" | jq -r '.body.data[0].id')
-printf 'NS=%s\nRG=%s\nREF=%s\nEP=%s\nGR=%s\n' $NS $RG $REF $EP $GR | tee ids.env
+# restore the previous default, if there was one (our reference stays decryptable)
+[ -n "$PREV_DEFAULT" ] && api PUT /api/v2/tenant/config/$PREV_DEFAULT '{"isDefault":true}' | jq -c .status
+printf 'PROXY_ID=%s\nPREV_DEFAULT=%s\nNS=%s\nRG=%s\nREF=%s\nEP=%s\nGR=%s\n' $PROXY_ID "$PREV_DEFAULT" $NS $RG $REF $EP $GR | tee ids.env
 ```
 
 > **The resource group is what makes it visible in the web UI.** The namespace

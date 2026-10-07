@@ -50,6 +50,9 @@ still waits until they say so.
   references, endpoints and grants, and run `passport setup`/`whoami`/`request`/`daemon`/`ca status`
   yourself. Don't ask permission and don't ask the user to run them; report what you did. The only Passport
   steps for the human are browser approvals, `sudo` (`passport ca install`) and typing secret values.
+- **Secret references are encrypted for the team's *default* proxy.** Make yours the default while creating
+  references, then restore the previous default (the guides show how). Never register as non-default and
+  create references; they won't decrypt.
 - **The human types into their own terminal.** You can't type into theirs and they can't type into yours:
   give exact commands for anything needing sudo, a password, a browser or a secret value.
 - **Don't call it done early.** "An explicit curl works" is not "CLI and daemon fully configured"; report

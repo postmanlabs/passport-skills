@@ -16,6 +16,8 @@ trusted HTTPS address. By the end you will have:
 > generated on the instance, an interactive registry login. The previous EC2
 > design was verified end to end. The add-an-API and protection-demo commands
 > were verified on the local Docker setup with the same proxy image and CLI.
+> The demo-API test, the default-proxy rule and the proxy's trust of public
+> certificates were verified on the local Docker setup on 2026-10-07.
 > **This EC2 version has not yet completed a full run.** Treat any step that
 > fails as a bug in this guide and fix the guide.
 
@@ -81,8 +83,10 @@ Ask once per block. Then:
   - **Don't** ask permission for them.
   - **Don't** ask the user to run them.
   - **Do** run them, record the IDs with `st`, and say what you created.
-  - **One guard stays:** if the team already has a proxy, register yours with
-    `isDefault:false`, and tell the user why.
+  - **The default proxy matters.** Secret references are encrypted for the
+    team's default proxy. Keep yours the default only while you create
+    references, then restore the previous default (step 6 shows how), and tell
+    the user you did.
   - **AWS changes still need the approval blocks above.**
 
 **Commands that need the human.** You can't type into the user's terminal, and
@@ -412,7 +416,7 @@ created, using this table with the real IDs:
 
 | Action | Object | Name / value |
 |---|---|---|
-| CREATE | Proxy registration | `passport-proxy-<NAME>`, endpoint `https://<PROXY_HOST>:8443`, management `https://<CF_DOMAIN>`, key sha256 `<REF_KEY_SHA256>`. **Made the default only if the team has no proxy yet**, because the default changes what every teammate's `passport setup` uses |
+| CREATE | Proxy registration | `passport-proxy-<NAME>`, endpoint `https://<PROXY_HOST>:8443`, management `https://<CF_DOMAIN>`, key sha256 `<REF_KEY_SHA256>`. Made the team default **while the references are created**, then the previous default (if any) is restored |
 | CREATE | Namespace | `passport-proxy-<NAME>-e2e` |
 | CREATE | Resource group | `passport-demo.mock.postman.postman.dev` (`source: manual`), so the endpoint shows in the web UI |
 | CREATE | Secret reference | `demo` → HashiCorp Vault key `demo-api-key` |
@@ -422,9 +426,10 @@ created, using this table with the real IDs:
 
 ```bash
 REPO=<repo>; . "$REPO/scripts/env.sh"; set -e; cd /tmp/pp-aws
-DEFAULT=$(api GET /api/v2/tenant/config | jq '(.body.data|length)==0')
+PREV=$(api GET /api/v2/tenant/config | jq -r '[.body.data[]|select(.isDefault==true)][0].proxyId // empty')
+[ -n "$PREV" ] && st PREV_DEFAULT "$PREV"          # the team's default before us; restored at the end of this block
 jq -n --rawfile k reference-public-key.pem --arg n "passport-proxy-$NAME" --arg e "https://$PROXY_HOST:8443" --arg m "https://$CF_DOMAIN" \
-  --argjson d "$DEFAULT" '{encryptionMode:"B",publicKey:$k,proxyName:$n,proxyEndpoint:$e,managementHostUrl:$m,isDefault:$d}' > register-body.json
+  '{encryptionMode:"B",publicKey:$k,proxyName:$n,proxyEndpoint:$e,managementHostUrl:$m,isDefault:true}' > register-body.json
 st PROXY_ID "$(api POST /api/v2/tenant/config @register-body.json | jq -r .body.data.proxyId)"
 GOT=$(api GET /api/v2/tenant/config | jq -r --arg p "$PROXY_ID" '.body.data[]|select(.proxyId==$p).publicKey' | openssl pkey -pubin -outform DER | openssl dgst -sha256 | awk '{print $NF}')
 [ "$GOT" = "$REF_KEY_SHA256" ] && echo "registered key matches the instance's key" || { echo "KEY MISMATCH"; exit 1; }
@@ -438,8 +443,24 @@ st RG  "$(api POST /api/v1/namespaces/$NS/resource-groups '{"name":"passport-dem
 st REF "$(api POST /api/v2/secret-references "$(jq -nc --arg ns "$NS" '{namespaceId:$ns,name:"demo",vaultType:"hashicorp",vaultKey:"demo-api-key"}')" | jq -r .body.data.id)"
 st EP  "$(api POST /api/v2/resource-endpoints "$(jq -nc --arg ns "$NS" --arg r "$REF" --arg g "$RG" '{namespaceId:$ns,method:"GET",host:"passport-demo.mock.postman.postman.dev",path:"/",secrets:[{label:"x-demo-api-key",secretReferenceId:$r}],resourceGroupIds:[$g]}')" | jq -r .body.data.id)"
 st GR  "$(api POST /api/v2/access-grants "$(jq -nc --arg u "$PP_USER" --arg ns "$NS" --arg e "$EP" '{userId:$u,namespaceId:$ns,endpointIds:[$e],reason:"passport proxy e2e",validity:1}')" | jq -r '.body.data[0].id')"
-grep -E '^(PROXY_ID|NS|RG|REF|EP|GR)=' state.env
+# Restore the team's previous default. Our reference stays decryptable: its key was fixed when it was created.
+[ -n "${PREV_DEFAULT:-}" ] && echo "restored default -> $(api PUT /api/v2/tenant/config/$PREV_DEFAULT '{"isDefault":true}' | jq -c .status)"
+grep -E '^(PROXY_ID|NS|RG|REF|EP|GR|PREV_DEFAULT)=' state.env
 ```
+
+**Why the default matters (verified in `passport-service`):** Passport
+encrypts each new secret reference with the public key of the team's
+**default** proxy registration. If there's no default, it uses an arbitrary
+registration. Nothing in the request chooses the proxy. A reference created
+while another proxy is the default can't be decrypted by yours (`failed to
+decrypt vault reference`). The key is fixed when the reference is created, so
+the safe pattern on a team that already has a default is:
+1. remember the current default;
+2. make your proxy the default;
+3. create your references;
+4. restore the previous default.
+
+Your references keep working, and teammates aren't left on your test proxy.
 
 `st` refuses to record an empty value. If an ID comes back empty, run
 `passport auth status` (it refreshes the login token), then re-run only the
@@ -677,11 +698,13 @@ bundle, so publicly trusted HTTPS certificates work as they are.
    REPO=<repo>; . "$REPO/scripts/env.sh"; cd /tmp/pp-aws
    PP_USER=$(node -e 'const fs=require("fs"),p=require("path");const t=JSON.parse(fs.readFileSync(p.join(process.env.PASSPORT_DIR,"passportrc"),"utf8")).login._profiles[0].workos.accessToken;console.log(JSON.parse(Buffer.from(t.split(".")[1],"base64url")).sub)')
    RG_N=$(api POST /api/v1/namespaces/$NS/resource-groups "$(jq -nc --arg n "$EP_HOST" '{name:$n,description:"Added after e2e",source:"manual"}')" | jq -r .body.data.id)
+   api PUT /api/v2/tenant/config/$PROXY_ID '{"isDefault":true}' >/dev/null      # references are encrypted for the default proxy (step 6)
    REF_N=$(api POST /api/v2/secret-references "$(jq -nc --arg ns "$NS" --arg k "$VKEY" '{namespaceId:$ns,name:$k,vaultType:"hashicorp",vaultKey:$k}')" | jq -r .body.data.id)
    EP_N=$(api POST /api/v2/resource-endpoints "$(jq -nc --arg ns "$NS" --arg m "$EP_METHOD" --arg h "$EP_HOST" --arg p "$EP_PATH" --arg l "$HDR" --arg r "$REF_N" --arg g "$RG_N" \
      '{namespaceId:$ns,method:$m,host:$h,path:$p,secrets:[{label:$l,secretReferenceId:$r}],resourceGroupIds:[$g]}')" | jq -r .body.data.id)
    GR_N=$(api POST /api/v2/access-grants "$(jq -nc --arg u "$PP_USER" --arg ns "$NS" --arg e "$EP_N" '{userId:$u,namespaceId:$ns,endpointIds:[$e],reason:"passport extra resource",validity:1}')" | jq -r '.body.data[0].id')
    printf '%s RG=%s REF=%s EP=%s GR=%s\n' "$EP_METHOD $EP_HOST$EP_PATH" $RG_N $REF_N $EP_N $GR_N | tee -a resources.env
+   [ -n "${PREV_DEFAULT:-}" ] && api PUT /api/v2/tenant/config/$PREV_DEFAULT '{"isDefault":true}' >/dev/null   # restore
    ```
    `resources.env` keeps one line per added API, and cleanup reads it. If an ID
    comes back empty, run `passport auth status` and re-run the block.

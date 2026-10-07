@@ -82,7 +82,7 @@ Check in this order, and stop at the first one that's wrong:
 |---|---|
 | `not authorized for vault refs: [...]` though `whoami` shows the grant | The endpoint `host` was registered **with** a port. Re-create it with a bare hostname, recreate the grant, and run `passport setup` again. This error is also the *expected* result of protection demo 11.A. |
 | The demo API shows `"key":"{{vau…"` / `"key_length":46` (the pointer arrived unchanged) | Either the request didn't go through the proxy (daemon form in an old terminal without `HTTPS_PROXY`, or a `NO_PROXY` host), or you used the reference's name instead of its UUID. |
-| `failed to decrypt vault reference: <uuid>` | The reference was created under a different proxy registration (key) than the one running. Create a fresh reference, endpoint and grant under the current registration. |
+| `failed to decrypt vault reference: <uuid>` | The reference was encrypted for a different proxy: the team's **default** registration when it was created (or an arbitrary one if none was default), or an earlier registration of yours with another key. Fix: make your proxy the default (`api PUT /api/v2/tenant/config/<your proxyId> '{"isDefault":true}'`), re-encrypt the reference (`api PUT /api/v2/secret-references/<ref> '{"vaultKey":"<its vault key>"}'`), run `passport setup` again, then restore the previous default. Verified 2026-10-07. |
 | The endpoint works but doesn't show in the web UI | It was created without `resourceGroupIds`. Attach a resource group (step 6). |
 | `api` prints `token expired` / an ID comes back empty | Run `passport auth status` to refresh the login token, then re-run only the missing lines. |
 | `DELETE /api/v2/tenant/config/<id>` returns 404 | Use the `proxyId` UUID, not the numeric `id`. |

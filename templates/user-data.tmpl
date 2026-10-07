@@ -54,13 +54,23 @@ set -euo pipefail
 . /opt/passport/proxy.conf
 docker pull "$IMAGE"
 docker logout ociregistry.usepassport.ai >/dev/null 2>&1 || true    # don't keep the registry key on disk after the pull
-# Give the proxy's non-root user read access to its keys, and nobody else.
-U="$(docker image inspect -f '{{.Config.User}}' "$IMAGE")"
-case "$U" in
-  ''|root|0|0:*) echo "image runs as root; keys stay 0600 root";;
-  [0-9]*) chown "${U%%:*}" /opt/passport/keys/ca.pem /opt/passport/keys/ref.pem; chmod 0400 /opt/passport/keys/ca.pem /opt/passport/keys/ref.pem;;
-  *) echo "image user '$U' is not numeric; making keys world-readable (no SSH, single-purpose host)"; chmod 0644 /opt/passport/keys/ca.pem /opt/passport/keys/ref.pem;;
+# Give the proxy's non-root user read access to its keys, and nobody else. The image may name its user
+# ("nonroot:nonroot" today), so resolve the name to a UID from the image's own /etc/passwd.
+U="$(docker image inspect -f '{{.Config.User}}' "$IMAGE")"; UNAME="${U%%:*}"; KUID=""
+case "$UNAME" in
+  ''|root|0) echo "image runs as root; keys stay 0600 root";;
+  *[!0-9]*) C="$(docker create "$IMAGE")"
+            KUID="$(docker cp "$C":/etc/passwd - 2>/dev/null | tar -xO 2>/dev/null | awk -F: -v u="$UNAME" '$1==u{print $3}')"
+            docker rm "$C" >/dev/null;;
+  *) KUID="$UNAME";;
 esac
+if [ -n "$KUID" ]; then
+  chown "$KUID" /opt/passport/keys/ca.pem /opt/passport/keys/ref.pem; chmod 0400 /opt/passport/keys/ca.pem /opt/passport/keys/ref.pem
+  echo "keys readable only by UID $KUID ($UNAME)"
+elif [ -n "$UNAME" ] && [ "$UNAME" != root ] && [ "$UNAME" != 0 ]; then
+  echo "could not resolve image user '$UNAME'; making keys world-readable (no SSH, single-purpose host)"
+  chmod 0644 /opt/passport/keys/ca.pem /opt/passport/keys/ref.pem
+fi
 docker rm -f pp-proxy-local >/dev/null 2>&1 || true
 docker run -d --name pp-proxy-local --restart unless-stopped --network pp-net -p 8443:8443 -p 8081:8081 \
   -v /opt/passport:/opt/passport:ro \
