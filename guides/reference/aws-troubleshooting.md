@@ -39,7 +39,7 @@ Step numbers refer to `guides/aws-single-instance.md`.
 | `echo $HTTPS_PROXY` is empty after setup | The terminal predates setup. Quit the terminal app completely and reopen it, or paste the `export …` lines setup printed. On Linux, export them yourself (step 8.3). |
 | Daemon request returns `502 cert unavailable — run passport setup` | No usable cert on disk. Run `passport setup`. If renewal keeps failing, the saved login has expired too: run `passport login`, then `passport setup`. |
 | Daemon request returns `502 denied by daemon allowlist` | `~/.passport/daemon.yml` routes that host to `deny`. Check its `mode`. |
-| A `localhost` / private-IP request bypasses Passport (the literal `{{vault:…}}` arrives) | Those hosts are in `NO_PROXY` by design. Use the explicit `--proxy …` form (step 8.2). |
+| A `localhost` / private-IP / `.internal` request bypasses Passport (the literal `{{vault:…}}` arrives) | Those hosts are in `NO_PROXY` by design. Use the explicit `--proxy …` form (step 8.2). |
 | `curl: (60) SSL certificate problem: unable to get local issuer certificate` / `self signed certificate in certificate chain`, or a Node `UNABLE_TO_VERIFY_LEAF_SIGNATURE` | The **local certificate validation failure**. The CLI doesn't map these errors to a fix, so diagnose rather than assume. Re-logging in fixed it once, but that won't always be the cause. Work through the next table. |
 | `passport request` prints `Error: … code=…` with no hint | It reports raw TLS/socket errors. Treat them like the row above. |
 
@@ -81,12 +81,12 @@ Check in this order, and stop at the first one that's wrong:
 | Symptom | Cause / fix |
 |---|---|
 | `not authorized for vault refs: [...]` though `whoami` shows the grant | The endpoint `host` was registered **with** a port. Re-create it with a bare hostname, recreate the grant, and run `passport setup` again. This error is also the *expected* result of protection demo 11.A. |
-| The echo receives the literal `{{vault:demo}}`, with no error | You used the reference's name instead of its UUID. |
-| `failed to decrypt vault reference: <uuid>` | The reference was created under a different proxy registration (key) than the one running. Create a fresh reference, endpoint and grant under the current registration. |
+| The demo API shows `"key":"{{vau…"` / `"key_length":46` (the pointer arrived unchanged) | Either the request didn't go through the proxy (daemon form in an old terminal without `HTTPS_PROXY`, or a `NO_PROXY` host), or you used the reference's name instead of its UUID. |
+| `failed to decrypt vault reference: <uuid>` | The reference was encrypted for a different proxy: the team's **default** registration when it was created (or an arbitrary one if none was default), or an earlier registration of yours with another key. Fix: make your proxy the default (`api PUT /api/v2/tenant/config/<your proxyId> '{"isDefault":true}'`), re-encrypt the reference (`api PUT /api/v2/secret-references/<ref> '{"vaultKey":"<its vault key>"}'`), run `passport setup` again, then restore the previous default. Verified 2026-10-07. |
 | The endpoint works but doesn't show in the web UI | It was created without `resourceGroupIds`. Attach a resource group (step 6). |
 | `api` prints `token expired` / an ID comes back empty | Run `passport auth status` to refresh the login token, then re-run only the missing lines. |
 | `DELETE /api/v2/tenant/config/<id>` returns 404 | Use the `proxyId` UUID, not the numeric `id`. |
-| `DELETE /api/v2/secret-references/<id>` returns 409 | An endpoint still maps it. Delete the endpoint first (step 12's order). |
+| `DELETE /api/v2/secret-references/<id>` returns 409 | An endpoint still maps it. Delete the endpoint first (step 10's order). |
 
 ## MDM-managed Mac
 

@@ -123,25 +123,54 @@ docker exec -e PASSPORT_DIR=/cli/.passport pp-cli-linux ./passport setup \
   --management-url http://localhost:8081 --proxy-url https://localhost:8443 --no-daemon
 docker exec -e PASSPORT_DIR=/cli/.passport pp-cli-linux ./passport whoami
 docker exec -e PASSPORT_DIR=/cli/.passport pp-cli-linux ./passport request \
-  "https://localhost:9443/echo" -H "x-key: {{vault:$REF}}"
+  "https://passport-demo.mock.postman.postman.dev" -H "x-demo-api-key: {{vault:$REF}}"   # expect "key":"sdfds…","key_length":19
 ```
 
-One more wrinkle: the echo server from step 7 needs to be reachable as
-exactly `localhost` *from the proxy container's own perspective* (to match
-the endpoint's registered `host`, per step 5.2's first gotcha) — not via
-`host.docker.internal` or a container DNS name. The reliable way is to run
-the echo server as a sidecar sharing the proxy's network namespace, instead
-of directly on your Mac:
+For the step 7 `curl`, use `D=~/passport-cli-dl/.passport`. The folder is
+bind-mounted, so your Mac's `curl` can read `cert.pem` and `key.pem`.
 
-```bash
-docker run -d --name pp-echo --network container:pp-proxy-local \
-  -v /tmp/pp-local/echo:/echo -w /echo node:20 node server.js
-```
+### A.5 Daemon on an MDM Mac (plain `curl` from your own terminal)
+
+The container CLI can run the daemon (`passport daemon start`), but the daemon
+listens on the container's own `127.0.0.1`, which your Mac can't reach. So:
+- run the daemon in a sidecar that shares the **proxy's** network, where
+  `localhost:8443` is the proxy;
+- publish its port on your Mac's **loopback only**, through a small forwarder.
+
+1. **Re-create the proxy with one extra port.** Use the step 4.4 `docker run`,
+   adding `-p 127.0.0.1:10144:10145`. The keys and Vault are unchanged, so
+   references keep working.
+2. **Start the daemon sidecar:**
+   ```bash
+   cat > ~/passport-cli-dl/daemon-fwd.js << 'EOF'
+   require('net').createServer(c=>{const u=require('net').connect(10144,'127.0.0.1');c.pipe(u).pipe(c);c.on('error',()=>u.destroy());u.on('error',()=>c.destroy());}).listen(10145,'0.0.0.0',()=>console.log('fwd 10145->10144'));
+   EOF
+   docker run -d --name pp-daemon --network container:pp-proxy-local -v ~/passport-cli-dl:/cli -w /cli -e PASSPORT_DIR=/cli/.passport node:20 \
+     sh -c "./passport setup --management-url http://localhost:8081 --proxy-url https://localhost:8443 --no-daemon >/cli/daemon-setup.log 2>&1; node /cli/daemon-fwd.js & exec ./passport daemon start --foreground"
+   docker exec -e PASSPORT_DIR=/cli/.passport pp-daemon ./passport daemon status     # upstream localhost:8443 (reachable)
+   ```
+3. **The block to give the user** for a new terminal window:
+   ```bash
+   export HTTPS_PROXY=http://127.0.0.1:10144
+   export SSL_CERT_FILE=~/passport-cli-dl/.passport/ca.pem
+   curl -sS -H "x-demo-api-key: {{vault:<REF>}}" https://passport-demo.mock.postman.postman.dev; echo
+   ```
+   macOS `/usr/bin/curl` (8.7) honours `SSL_CERT_FILE`.
+
+- **The sidecar shares the proxy's network,** so re-create `pp-daemon` whenever
+  you re-create `pp-proxy-local`.
+- **Cleanup:** add `docker rm -f pp-daemon`.
+
+> **Verified 2026-10-07** on an MDM Mac. The block above, in a clean shell,
+> returned `"key":"sdfds**************","key_length":19`. Without the `export`
+> lines, the API got the pointer unchanged (`"{{vau…",46`).
+> After the first 5-minute certificate expired, the same command still worked:
+> the daemon minted a new certificate on that request, so you never re-run setup.
 
 Clean up the extra pieces alongside step 8's cleanup:
 
 ```bash
-docker rm -f pp-echo pp-cli-linux
+docker rm -f pp-daemon pp-cli-linux
 rm -rf ~/passport-cli-dl
 ```
 
