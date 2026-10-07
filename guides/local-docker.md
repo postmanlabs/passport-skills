@@ -74,6 +74,18 @@ human:
   Close with the 7.1 result line: a person, script, or AI agent can call an API
   that needs a credential without ever holding it. Then remind them cleanup
   (step 8) is pending until they say so.
+- **Then offer step 7.2: help them add their own resources.** Ask which API they
+  want to call (method, URL, how it takes the credential, a Vault key name);
+  never ask for the secret value. Show them the step 2 table of what gets set.
+  Have the user store the value themselves with the 7.2 step 2a command, in
+  their own terminal; do 2b–2c yourself. Then **print both full `curl`
+  commands verbatim** with their real URL and `REF_N` UUID filled in: the
+  step 3 form (proxy and cert flags) and the step 4 env-var form (daemon, no
+  proxy flags). Explain the step 4 difference in plain words: the daemon holds
+  the cert and is the default proxy, so with the env vars set, any plain
+  `curl` to a granted external host goes through Passport. Run them only if
+  the user wants you to, and never print the API's response if it could
+  contain the secret.
 
 ## What you need
 
@@ -519,12 +531,274 @@ your machine**, **it works only on endpoints you were granted**, and
 
 ---
 
+### 7.2 Add your own resources (call a real API through Passport)
+
+The e2e test used a local echo server. Next, put one of *your* APIs behind the
+proxy, so you can try it with a credential you actually use.
+
+**1. Decide what to call.** You need four things, and none of them is the
+secret value:
+
+| Ask | Example |
+|---|---|
+| Method and full URL | `GET https://api.github.com/user` |
+| How the API takes the credential | header `Authorization: Bearer …`, header `x-api-key: …`, or a query param `?api_key=…` |
+| A name for the secret in Vault | `github-token` |
+| Should it be grouped with an existing host? | reuse the resource group if one with that host already exists |
+
+The API must be reachable from the proxy container (public internet works;
+hosts only reachable over your VPN may not be). Publicly trusted HTTPS
+certificates work as-is.
+
+**2. What has to be set, in order**
+
+| What | Where | Why |
+|---|---|---|
+| The secret value | local Vault, `secret/<vault-key>` | the proxy fetches it from here at request time |
+| Secret reference | Passport Cloud | points at `<vault-key>`; its UUID is what goes in your requests |
+| Resource group | Passport Cloud | makes the endpoint show in the web UI (see step 5.4) |
+| Endpoint | Passport Cloud | method + host (**no port**) + path (no query string), linked to the secret reference |
+| Access grant | Passport Cloud | lets your user call that endpoint |
+| Fresh `passport setup` | your CLI | the cert lists granted endpoints at the time it's issued |
+
+**2a. Store the secret value: you do this, in your own terminal.** The value
+is typed at a hidden prompt and passed on stdin, so it never appears in chat,
+shell history or a process list:
+
+```bash
+read -rs -p "Secret value: " V; echo
+printf %s "$V" | docker exec -i -e VAULT_ADDR=http://127.0.0.1:8200 -e VAULT_TOKEN=root-token-for-local-dev \
+  pp-vault-dev vault kv put secret/<vault-key> value=- >/dev/null && echo stored; unset V
+```
+
+`pp-vault-dev` is in-memory: re-run this if the Vault container is re-created.
+
+**2b. Create the Passport Cloud objects** (fill in the first line):
+
+```bash
+EP_METHOD=GET; EP_HOST=api.github.com; EP_PATH=/user; VKEY=github-token; HDR=Authorization
+cd /tmp/pp-local; source ids.env
+export PASSPORT_DIR=~/.passport                  # MDM: ~/passport-cli-dl/.passport
+api() { node /tmp/pp-local/passport-api.js "$@"; }
+PP_USER=$(node -e 'const fs=require("fs"),p=require("path");const rc=JSON.parse(fs.readFileSync(p.join(process.env.PASSPORT_DIR,"passportrc"),"utf8"));console.log(JSON.parse(Buffer.from(rc.login._profiles[0].workos.accessToken.split(".")[1],"base64url")).sub)')
+
+RG_N=$(api POST /api/v1/namespaces/$NS/resource-groups "$(jq -nc --arg n "$EP_HOST" '{name:$n,description:"Added after e2e",source:"manual"}')" | jq -r '.body.data.id')
+REF_N=$(api POST /api/v2/secret-references "$(jq -nc --arg ns "$NS" --arg k "$VKEY" '{namespaceId:$ns,name:$k,vaultType:"hashicorp",vaultKey:$k}')" | jq -r '.body.data.id')
+EP_N=$(api POST /api/v2/resource-endpoints "$(jq -nc --arg ns "$NS" --arg m "$EP_METHOD" --arg h "$EP_HOST" --arg p "$EP_PATH" --arg l "$HDR" --arg r "$REF_N" --arg g "$RG_N" \
+  '{namespaceId:$ns,method:$m,host:$h,path:$p,secrets:[{label:$l,secretReferenceId:$r}],resourceGroupIds:[$g]}')" | jq -r '.body.data.id')
+GR_N=$(api POST /api/v2/access-grants "$(jq -nc --arg u "$PP_USER" --arg ns "$NS" --arg e "$EP_N" '{userId:$u,namespaceId:$ns,endpointIds:[$e],reason:"passport extra resource",validity:1}')" | jq -r '.body.data[0].id')
+printf '%s RG=%s REF=%s EP=%s GR=%s\n' "$EP_METHOD $EP_HOST$EP_PATH" $RG_N $REF_N $EP_N $GR_N | tee -a resources.env
+```
+
+If any ID comes back empty, run `passport auth status` (it refreshes the login
+token) and re-run the block. To reuse an existing group for the same host, set
+`RG_N` to its ID and skip that line. `resources.env` keeps one line per
+resource for cleanup.
+
+**2c. Refresh the cert**, then check `passport whoami` lists the new endpoint
+and `{{vault:<REF_N>}}`:
+
+```bash
+passport setup --management-url http://localhost:8081 --proxy-url https://localhost:8443
+passport whoami
+```
+
+(MDM: the A.4 container form, with `--no-daemon`.)
+
+**3. The full `curl`, with the proxy and cert flags.** Put the
+`{{vault:<uuid>}}` pointer exactly where the API expects the credential:
+
+```bash
+D=~/.passport                                    # MDM: ~/passport-cli-dl/.passport
+curl -sS --proxy https://localhost:8443 \
+  --proxy-cacert $D/ca.pem --proxy-cert $D/cert.pem --proxy-key $D/key.pem \
+  --cacert $D/ca.pem \
+  -H "Authorization: Bearer {{vault:<REF_N>}}" \
+  "https://api.github.com/user"
+```
+
+- `--cacert $D/ca.pem` trusts the certificate the proxy presents for the
+  destination; it's the same CA the proxy serves at
+  `http://localhost:8081/ca.pem`.
+- Credential in a **query param**? Add `-g`. Without it, curl reads `{{` as its
+  own URL-glob syntax and fails with `nested brace in URL`:
+  `curl -sS -g … "https://api.example.com/v1/items?api_key={{vault:<REF_N>}}"`.
+- The pointer can also go in the body or URL path (per the CLI's `whoami`
+  text; only headers and query params were tested here).
+
+**4. Use the default proxy with env vars, so curl needs no proxy or cert flags.**
+
+The CLI's **daemon** is a small local proxy on `http://127.0.0.1:10144`. It
+holds your client cert, talks mTLS to the local Passport proxy for you, and fetches a fresh
+cert when the ~5-minute one runs out. Once your shell has the daemon's env
+vars, a plain request with only the `{{vault:<uuid>}}` pointer goes through
+Passport.
+
+**macOS / Windows (not MDM): let `passport setup` do it.** Run setup *without*
+`--no-daemon`, as step 6 already does:
+
+```bash
+passport setup --management-url http://localhost:8081 --proxy-url https://localhost:8443
+```
+
+It installs the daemon and sets `HTTPS_PROXY`, `NO_PROXY`,
+`NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE` and `SSL_CERT_FILE` for your login
+session (`[5/5] daemon installed + HTTPS_PROXY set`). The terminal you ran it
+in doesn't see them yet, and setup prints two ways to fix that:
+
+- quit your terminal app completely (not just the tab) and reopen it, **or**
+- paste the `export …` lines setup prints into the current session.
+
+Then check, and trust the Passport CA for tools that use the OS trust store
+(setup warns `The Passport CA is not trusted by this machine` until you do):
+
+```bash
+echo $HTTPS_PROXY                  # http://127.0.0.1:10144
+passport ca install                # system keychain; runs under sudo. Undo: passport ca uninstall
+passport daemon status             # upstream reachable, cert expiry, request counts
+```
+
+Now the plain `curl`, with no proxy or cert flags:
+
+```bash
+curl -sS -H "Authorization: Bearer {{vault:<REF_N>}}" "https://api.github.com/user"
+```
+
+- Interactive shells only? `passport daemon install --write-to ~/.zshrc` also
+  appends the vars to your rc file. That block adds
+  `NODE_OPTIONS=--use-env-proxy` (Node's built-in HTTP/fetch ignores
+  `HTTPS_PROXY` without it) and `JAVA_TOOL_OPTIONS` proxy settings for JVMs.
+- `passport ca install` doesn't replace `NODE_EXTRA_CA_CERTS`: Node uses its
+  own bundled roots, so it needs both.
+
+**Linux:** automatic install isn't supported there, so start the daemon and
+export the vars yourself:
+
+```bash
+passport daemon start
+export HTTPS_PROXY=http://127.0.0.1:10144
+export SSL_CERT_FILE=~/.passport/ca.pem REQUESTS_CA_BUNDLE=~/.passport/ca.pem NODE_EXTRA_CA_CERTS=~/.passport/ca.pem
+curl -sS -H "Authorization: Bearer {{vault:<REF_N>}}" "https://api.github.com/user"
+```
+
+**The daemon only routes external hosts.** It always sends these direct,
+never through Passport: `localhost`, `127.0.0.1`, `::1`, private IP ranges,
+`.local`, `.internal`, `.svc`, `.cluster.local`, `.postmanlabs.com` (and its
+`-beta`/`-stage` variants) and `.usepassport.ai` (and its `-beta`/`-stage`
+variants). So the step 7 `localhost:9443` echo test, or an API on
+those domains, needs the explicit curl from step 3.
+`passport daemon stop` stops the daemon.
+
+> **Verified 2026-10-06** on the MDM container path (daemon started by hand) against `postman-echo.com`
+> with a fake value: both the step 3 curl and the step 4 env-var curl
+> delivered the Vault value (matching sha256), via a header and via a
+> query param, and the daemon renewed its expired cert on its own. The
+> non-MDM host form of step 4 (`passport setup` installing the daemon) was
+> not run.
+
+### 7.3 Show what Passport protects: scope, audit, revoke, rotate
+
+Four short demos on the resource you added (or the e2e one). Each takes a
+minute and shows one thing a plain API key can't do. Use the explicit curl
+form from 7.2 step 3 (it works for every host); `$D` is `~/.passport` (MDM: `~/passport-cli-dl/.passport`) and `PROXY=https://localhost:8443`.
+
+**A. A leaked pointer is useless anywhere else.** Send the *same* pointer to a
+path, or a host, that wasn't granted:
+
+```bash
+curl -sS --proxy $PROXY --proxy-cacert $D/ca.pem --proxy-cert $D/cert.pem --proxy-key $D/key.pem --cacert $D/ca.pem \
+  -H "x-api-key: {{vault:<REF_N>}}" "https://<granted-host>/some-other-path"
+curl -sS --proxy $PROXY --proxy-cacert $D/ca.pem --proxy-cert $D/cert.pem --proxy-key $D/key.pem --cacert $D/ca.pem \
+  -H "x-api-key: {{vault:<REF_N>}}" "https://httpbin.org/headers"
+```
+
+Both are refused with `passport: not authorized for vault refs: [<uuid>]`.
+The secret is only ever injected on the exact method, host and path that
+was granted. A pointer that ends up in a log, a copied script or a
+prompt-injected AI agent can't be used to send the secret anywhere else.
+
+**B. Every call is audited, and the logs never hold the secret.**
+
+```bash
+docker logs pp-proxy-local 2>&1 | grep '"passport.proxy.request"' | jq -r '.resourceLogs[].scopeLogs[].logRecords[]
+  | ([.attributes[] | {(.key): (.value|to_entries[0].value)}] | add) as $a
+  | [$a["http.request.method"], $a["server.address"] + $a["http.route"], $a["passport.outcome"], $a["enduser.id"]] | @tsv' | tail
+```
+
+Each line shows method, host and path, outcome (`success` / `unauthorized`)
+and the user ID. The records carry secret reference UUIDs, never values.
+With a test value you can prove it: `docker logs pp-proxy-local 2>&1 | grep -c '<test value>'` prints `0`.
+
+**C. Revoke a grant and access ends.** Delete the grant, get a new cert, and
+the same call is refused:
+
+```bash
+cd /tmp/pp-local; export PASSPORT_DIR=~/.passport   # MDM: ~/passport-cli-dl/.passport
+api() { node /tmp/pp-local/passport-api.js "$@"; }
+api DELETE /api/v2/access-grants/$GR_N
+passport setup --management-url http://localhost:8081 --proxy-url https://localhost:8443
+passport whoami                                  # the endpoint is gone from allowedApiRefs
+# the curl from 7.2 step 3 now returns: passport: not authorized for vault refs: [<uuid>]
+```
+
+Every issued cert lasts ~5 minutes, so even a copied cert stops working
+shortly after a revoke. To restore access, create the grant again (the
+`GR_N=…` line from the add-a-resource block) and update its `GR=` value in
+`/tmp/pp-local/resources.env`.
+
+**D. Rotate the secret: no client changes.** Write a new value under the same
+Vault key (user does this, as in the add-a-resource step), then run the
+*same* curl again:
+
+```bash
+read -rs -p "New secret value: " V; echo
+printf %s "$V" | docker exec -i -e VAULT_ADDR=http://127.0.0.1:8200 -e VAULT_TOKEN=root-token-for-local-dev \
+  pp-vault-dev vault kv put secret/<vault-key> value=- >/dev/null && echo stored; unset V
+```
+
+The same `{{vault:<REF_N>}}` pointer now delivers the new value. The proxy caches Vault lookups for about a minute, so the change shows up within that window.
+No script, config, CI variable or teammate's laptop needs an update.
+
+> **Verified 2026-10-06** on the local Docker setup (MDM container path), with `postman-echo.com` and fake values:
+> A refused both the other path and `httpbin.org`; B listed every call with no
+> secret value in the logs; C refused the call after the revoke and a fresh
+> cert; D delivered the rotated value on the same pointer 28 s after the Vault write.
+
+**What to tell the user**, in their terms:
+
+- **Nothing to leak.** No API key on laptops, in repos, in CI or in an AI
+  agent's context.
+- **Least privilege.** Access is per method, host and path, per person.
+- **Instant control.** Revoke or rotate centrally.
+- **A full audit trail.** Who called what, and whether it was allowed.
+
+It works with the tools they already use: curl, scripts and SDKs through the
+daemon env vars.
+
+---
+
 ## 8. Cleanup (only after you confirm you're done testing)
 
 **Don't run this until you've actually said you're done.** It tears down
 containers, the network, and (if full e2e was done) real objects in your
 Passport Cloud team — none of that should happen just because a test
 finished or a step succeeded.
+
+If you added resources in step 7.2, delete those first (grant → endpoint →
+group → secret reference), and stop the daemon:
+
+```bash
+cd /tmp/pp-local; export PASSPORT_DIR=~/.passport   # MDM: ~/passport-cli-dl/.passport
+api() { node /tmp/pp-local/passport-api.js "$@"; }
+[ -f resources.env ] && while read -r m u rest; do
+  eval "$rest"   # sets RG REF EP GR
+  api DELETE /api/v2/access-grants/$GR; api DELETE /api/v2/resource-endpoints/$EP
+  api DELETE /api/v1/resource-groups/$RG; api DELETE /api/v2/secret-references/$REF
+done < resources.env
+passport daemon stop
+```
+
+Then:
 
 ```bash
 docker rm -f pp-echo pp-proxy-local pp-vault-dev
