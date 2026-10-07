@@ -66,8 +66,7 @@ human:
   and reuse it; never regenerate `ref.pem` if one is registered.
 - **Never tear anything down (step 8)** until the user explicitly says so.
 - **Right after the step 7 test passes, continue with `guides/after-setup.md`**
-  (mandatory). Send its short handoff first, then offer to add their own API,
-  and offer the protection demos one at a time.
+  (mandatory). Send its short handoff first, then offer to add their own API.
 
 ## What you need
 
@@ -433,11 +432,11 @@ does the same thing through the CLI.
 
 ---
 
-### 7.1 Next: show the value, add an API, demos
+### 7.1 Next: show the value, add an API
 
 Continue with **`guides/after-setup.md`**, which is shared with the AWS setup.
-Use its *Local Docker* load block. It covers the handoff message, adding your
-own API, and the protection demos.
+Use its *Local Docker* load block. It covers the handoff message and adding
+your own API.
 
 ---
 

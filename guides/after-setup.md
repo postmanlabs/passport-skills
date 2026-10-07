@@ -1,15 +1,13 @@
-# After setup: show the value, add an API, demos
+# After setup: show the value, add an API
 
 This is shared by both setups. Use it once the end-to-end test in your setup
 guide passes:
 - **Local Docker:** `guides/local-docker.md` step 7 printed `INJECTED`.
 - **AWS:** `guides/aws-single-instance.md` step 8.5 passed.
 
-It has four parts, run in order:
+It has two parts, run in order:
 1. **Handoff:** one short message that shows the value.
 2. **Add your own API:** offer this as the single next step.
-3. **Protection demos:** offer these after their API works, or when asked.
-4. **What to tell the user.**
 
 Cleanup stays in each setup guide, and runs only when the user explicitly asks.
 
@@ -24,7 +22,6 @@ cd /tmp/pp-local; . ./ids.env; W=/tmp/pp-local
 export PASSPORT_DIR=~/.passport                      # MDM Mac: ~/passport-cli-dl/.passport
 api() { node /tmp/pp-local/passport-api.js "$@"; }
 PROXY=https://localhost:8443; MGMT=http://localhost:8081; DESTCA=/tmp/pp-local/proxy-ca.pem; D=$PASSPORT_DIR
-proxylogs() { docker logs pp-proxy-local 2>&1 | tail -300; }
 ```
 
 **AWS:**
@@ -32,7 +29,6 @@ proxylogs() { docker logs pp-proxy-local 2>&1 | tail -300; }
 ```bash
 REPO=<repo>; . "$REPO/scripts/env.sh"; cd /tmp/pp-aws; W=/tmp/pp-aws
 PROXY=https://$PROXY_HOST:8443; MGMT=https://$CF_DOMAIN; DESTCA=/tmp/pp-aws/proxy-ca.pem; D=$PASSPORT_DIR
-proxylogs() { onhost 'docker logs pp-proxy-local 2>&1 | tail -300'; }
 ```
 
 | Name | Meaning |
@@ -143,8 +139,7 @@ Rules for this message:
   daemon is running. Otherwise show the explicit form you actually ran
   (`curl --proxy $PROXY … -H "x-demo-api-key: …" https://passport-demo…`), and
   say the daemon isn't set up. On an MDM Mac it never is.
-- **One next step:** their own API (part 2). Offer the demos (part 3) only after
-  that works, or if they ask.
+- **One next step:** their own API (part 2).
 - **Be honest about the demo key.** It's the demo API's public sample key, so it
   appears in the guides. With their own key, the value goes only into a hidden
   prompt, and never into their shell history or this conversation. Say so if
@@ -154,7 +149,7 @@ Rules for this message:
 
 ---
 
-## How to report every step after this (parts 2 and 3)
+## How to report every step after this (part 2)
 
 For each step you run, show three things, in this order:
 1. **What I ran:** the exact commands, verbatim, with real values. If several
@@ -164,11 +159,11 @@ For each step you run, show three things, in this order:
 2. **What came back:** the real output. Trim long output, but never paraphrase it.
 3. **What it proves:** one plain sentence.
 
-When the access chain changes (an API added, a grant revoked or restored), show
-the chain again with the change marked:
+When the access chain changes (an API is added), show the chain again with the
+new link marked:
 
 ```
- └─ access grant      a5087ac2…   ✗ revoked: the endpoint is no longer in your certificate
+ └─ access grant      a5087ac2…   + new: GET api.github.com /user
 ```
 
 ## 2. Add your own API (call a real API through Passport)
@@ -305,96 +300,3 @@ curl -sS -H "Authorization: Bearer {{vault:<REF_N>}}" "https://api.github.com/us
 > - **Part 0 and the part 2 agent block** (with the default-proxy switch) created
 >   all four objects for `GET postman-echo.com/headers`.
 > - **The explicit request** delivered the stored fake value.
-> - **Demos A and B** behaved as described, with `0` secret values in the proxy logs.
-
----
-
-## 3. Protection demos (offer one at a time, explain each result)
-
-Use the explicit form from part 2, step 4, with your API's pointer
-(`<REF_N>`, `<HDR>`) or the demo's (`$REF`, `x-demo-api-key`).
-
-**A. A leaked pointer is useless anywhere else.** Send the *same* pointer to a
-host that wasn't granted:
-
-```bash
-curl -sS --proxy $PROXY --proxy-cacert $D/ca.pem --proxy-cert $D/cert.pem --proxy-key $D/key.pem --cacert $DESTCA \
-  -H "x-demo-api-key: {{vault:$REF}}" https://httpbin.org/headers
-```
-
-It's refused with `passport: not authorized for vault refs: [<uuid>]`.
-- **This proves:** the secret is injected only on the exact method, host and
-  path that were granted.
-- **Why it matters:** a pointer that ends up in a log, a copied script or a
-  prompt-injected AI agent can't be used to send the secret anywhere else.
-
-**B. Every call is audited, and the logs never hold the secret.**
-
-```bash
-proxylogs | grep passport.proxy.request | grep -o '{"resourceLogs".*' \
-  | jq -r '.resourceLogs[].scopeLogs[].logRecords[] | ([.attributes[] | {(.key): (.value|to_entries[0].value)}] | add) as $a
-  | [$a["http.request.method"], $a["server.address"] + $a["http.route"], $a["passport.outcome"], $a["enduser.id"]] | @tsv' | tail
-```
-
-- **What each line shows:** the method, host and path, the outcome (`success`
-  or `unauthorized`), and the user ID.
-- **No values:** the records carry secret-reference UUIDs only. To prove it with
-  the demo key, `proxylogs | grep -c sdfdsfdsfsdfdfsdfds` prints `0`.
-
-**C. Revoke a grant and access ends.** Once the user picks this demo, the agent
-deletes the grant itself (`$GR_N` for their API, `$GR` for the demo), refreshes
-the certificate (part 0), and repeats the call:
-
-```bash
-api DELETE /api/v2/access-grants/$GR
-passport whoami                 # after the refresh: the endpoint is gone from allowedApiRefs
-```
-
-- **Expect:** the same call is now refused with `not authorized for vault refs`.
-- **This proves:** access ends centrally, and a copied certificate expires within
-  minutes. The user never held the credential, so there's nothing for them to keep.
-- **Restore access** for an API added in part 2 (`EP_N` and `GR_N` from its `resources.env` line):
-  ```bash
-  PP_USER=$(node -e 'const fs=require("fs"),p=require("path");const t=JSON.parse(fs.readFileSync(p.join(process.env.PASSPORT_DIR,"passportrc"),"utf8")).login._profiles[0].workos.accessToken;console.log(JSON.parse(Buffer.from(t.split(".")[1],"base64url")).sub)')
-  NEW_GR=$(api POST /api/v2/access-grants "$(jq -nc --arg u "$PP_USER" --arg ns "$NS" --arg e "$EP_N" '{userId:$u,namespaceId:$ns,endpointIds:[$e],reason:"passport extra resource",validity:1}')" | jq -r '.body.data[0].id')
-  [ -n "$NEW_GR" ] && [ "$NEW_GR" != null ] && sed -i.bak "s/GR=$GR_N/GR=$NEW_GR/" $W/resources.env && echo "restored $NEW_GR"
-  ```
-  For the demo grant, use `$EP` and record the new ID as `GR` (local: edit
-  `ids.env`; AWS: `st GR "$NEW_GR"`). Then refresh the certificate (part 0).
-
-**D. Rotate the secret with no client changes.**
-1. **[you]** store a new value under the same Vault key (part 0 table).
-2. Wait about 60 s, because the proxy caches Vault lookups.
-3. Repeat the same call.
-
-- **Expect:** the same pointer now delivers the new value. With the demo API,
-  the response shows the new value's first 5 characters and its length.
-- **This proves:** no script, configuration, CI variable or teammate's laptop
-  needs an update.
-
-> **Verified 2026-10-06** on the local Docker setup (MDM container path), with
-> `postman-echo.com` and fake values:
-> - **A** refused both another path and `httpbin.org`.
-> - **B** listed every call, with no secret value in the logs.
-> - **C** refused the call after the revoke and a fresh certificate.
-> - **D** delivered the rotated value on the same pointer 28 s after the Vault write.
->
-> **Re-verified 2026-10-07 from this shared file** (local Docker, MDM container path,
-> `postman-echo.com`, fake values):
-> - **C:** after the revoke and a refresh, the endpoint left `whoami` and the call
->   was refused. The restore commands above brought access back.
-> - **D:** the old value was returned at +0, +20 and +40 s, and the new value at +60 s.
-
----
-
-## 4. What to tell the user, in their terms
-
-- **Nothing to leak:** no API key on laptops, in repos, in CI or in an AI agent's context.
-- **Least privilege:** access is per method, host and path, per person.
-- **Central control:** revoke or rotate from one place.
-- **An audit trail** of who called what, and whether it was allowed.
-
-It works with the tools they already use: curl, scripts and SDKs, through the
-daemon's environment variables. End every reply in this phase with the resource
-status, any open issue, and the reminder that **nothing is deleted until they
-explicitly ask for cleanup.**

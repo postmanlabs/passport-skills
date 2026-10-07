@@ -10,12 +10,12 @@ trusted HTTPS address. By the end you will have:
   the Passport CA trusted, and (on macOS/Windows) the Passport daemon running;
 - a real request that used a credential from Vault without you typing it into
   the request;
-- a worked example of adding your own API, and optional protection demos.
+- a worked example of adding your own API.
 
 > **Status:** rewritten 2026-10-06. Changes: no AWS Secrets Manager, keys
 > generated on the instance, an interactive registry login. The previous EC2
-> design was verified end to end. The add-an-API and protection-demo commands
-> were verified on the local Docker setup with the same proxy image and CLI.
+> design was verified end to end. The add-an-API commands were verified on the
+> local Docker setup with the same proxy image and CLI.
 > The demo-API test, the default-proxy rule and the proxy's trust of public
 > certificates were verified on the local Docker setup on 2026-10-07.
 > **This EC2 version has not yet completed a full run.** Treat any step that
@@ -625,14 +625,13 @@ echo "$HTTPS_PROXY"           # http://127.0.0.1:10144 — in a NEW terminal win
 
 ---
 
-## 9. After setup: show the value, add an API, demos (mandatory)
+## 9. After setup: show the value, add an API (mandatory)
 
 Continue with **`guides/after-setup.md`**, which is shared with the local
 setup. Use its *AWS* load block. It covers:
 - the short handoff message;
 - adding your own API (you store the secret over an SSM session with
-  `passport-vault-put`; the agent creates the Passport objects);
-- the protection demos.
+  `passport-vault-put`; the agent creates the Passport objects).
 
 ---
 
