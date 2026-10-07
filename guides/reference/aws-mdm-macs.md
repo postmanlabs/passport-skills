@@ -79,14 +79,25 @@ shows `Logged in successfully.` Stop the forwarder afterwards:
 
 ### A.4 Setup and test (replaces steps 7 and 8's CLI calls)
 
+The API helper (`api`) reads this container's login. Record it once, so every
+`. "$REPO/scripts/env.sh"` uses it:
+`st PASSPORT_DIR ~/passport-cli-dl/.passport`.
+
 ```bash
-source /tmp/pp-aws/state.env
+REPO=<repo>; . "$REPO/scripts/env.sh"
 pp() { docker exec -e PASSPORT_DIR=/cli/.passport pp-cli-linux ./passport "$@"; }   # a function, not a string: zsh won't split a stored command
 pp setup --management-url https://$CF_DOMAIN --proxy-url https://$PROXY_HOST:8443 --no-daemon
 pp whoami
 pp request "https://localhost:9443/echo" -H "x-key: {{vault:$REF}}"
 ```
 
-For 8.1 use `D=~/passport-cli-dl/.passport` (the folder is bind-mounted, so the
-host's `curl` can read `cert.pem`/`key.pem`).
+For the explicit `curl` (steps 8.2 and 10), use `~/passport-cli-dl/.passport` in
+place of `~/.passport`. The folder is bind-mounted, so your Mac's `curl` can read
+`cert.pem` and `key.pem`.
 
+**What doesn't apply on this path:**
+- **`passport ca install` and the daemon.** The container CLI is Linux, which
+  supports neither. In step 8.5, report lines 3–4 as "not applicable (MDM
+  container path)", not ✅. Requests use the explicit form.
+- **Renewal.** Nothing renews `cert.pem` in the background. Re-run
+  `pp setup … --no-daemon` when `notAfter` passes.
