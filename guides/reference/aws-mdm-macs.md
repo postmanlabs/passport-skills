@@ -114,10 +114,18 @@ REPO=<repo>; . "$REPO/scripts/env.sh"
 cat > ~/passport-cli-dl/daemon-fwd.js << 'EOF'
 require('net').createServer(c=>{const u=require('net').connect(10144,'127.0.0.1');c.pipe(u).pipe(c);c.on('error',()=>u.destroy());u.on('error',()=>c.destroy());}).listen(10145,'0.0.0.0',()=>console.log('fwd 10145->10144'));
 EOF
-docker run -d --name pp-daemon -p 127.0.0.1:10144:10145 -v ~/passport-cli-dl:/cli -w /cli -e PASSPORT_DIR=/cli/.passport node:20 \
-  sh -c "./passport setup --management-url https://$CF_DOMAIN --proxy-url https://$PROXY_HOST:8443 --no-daemon >/cli/daemon-setup.log 2>&1; node /cli/daemon-fwd.js & exec ./passport daemon start --foreground"
-docker exec -e PASSPORT_DIR=/cli/.passport pp-daemon ./passport daemon status     # upstream <PROXY_HOST>:8443 (reachable)
+docker run -d --name pp-daemon --restart unless-stopped -p 127.0.0.1:10144:10145 -v ~/passport-cli-dl:/cli:ro -w /cli node:20 \
+  sh -c "umask 077; mkdir -p /root/.passport && cp /cli/.passport/passportrc /root/.passport/passportrc; export PASSPORT_DIR=/root/.passport; ./passport setup --management-url https://$CF_DOMAIN --proxy-url https://$PROXY_HOST:8443 --no-daemon > /root/setup.log 2>&1; node /cli/daemon-fwd.js & exec ./passport daemon start --foreground"
+docker exec -e PASSPORT_DIR=/root/.passport pp-daemon ./passport daemon status     # upstream <PROXY_HOST>:8443 (reachable)
 ```
+
+- **The daemon gets its own private credentials folder** (`/root/.passport`, inside its
+  container), seeded with a copy of your login. Don't share `~/passport-cli-dl/.passport` with it:
+  Docker Desktop reports shared sockets as `0755`, the CLI then refuses (`Passport daemon
+  ownership state has unsafe permissions`), marks the credentials inactive, and the daemon
+  answers `502`. With a private folder, `passport setup` in `pp-cli-linux` never interferes.
+- **Refresh the daemon's login** (if renewal fails after your login expires): `docker restart pp-daemon`.
+
 
 The block to give the user, for a new terminal window:
 
