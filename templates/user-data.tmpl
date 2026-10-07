@@ -14,7 +14,7 @@ SANS=__SANS__
 dnf -y -q install docker jq openssl
 systemctl enable --now docker
 
-install -d -m 0755 /opt/passport /opt/passport/echo
+install -d -m 0755 /opt/passport
 install -d -m 0711 /opt/passport/keys          # traversable, not listable, by the proxy's non-root user
 
 # --- proxy bootstrap keys (on disk, never in AWS) ----------------------------------------------
@@ -34,25 +34,6 @@ IMAGE=ociregistry.usepassport.ai/passport/passport-proxy:latest
 EOF
 chmod 0644 /opt/passport/proxy.conf
 
-# --- echo server for the end-to-end test (logs only a sha256 of x-key / authorization) ------------
-openssl req -x509 -newkey rsa:2048 -keyout /opt/passport/echo/echo-key.pem -out /opt/passport/echo/echo-cert.pem \
-  -days 30 -nodes -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" 2>/dev/null
-cat > /opt/passport/echo/server.js << 'JS'
-const https = require('https'), crypto = require('crypto'), fs = require('fs');
-const options = { key: fs.readFileSync(__dirname + '/echo-key.pem'), cert: fs.readFileSync(__dirname + '/echo-cert.pem') };
-https.createServer(options, (req, res) => {
-  const val = req.headers['x-key'] || '';
-  const sha256 = crypto.createHash('sha256').update(val).digest('hex');
-  console.log(JSON.stringify({ path: req.url, method: req.method, 'x-key-sha256': sha256, 'x-key-len': val.length }));
-  res.writeHead(200, { 'content-type': 'application/json' });
-  res.end(JSON.stringify({ ok: true, path: req.url, sha256 }));
-}).listen(9443, '0.0.0.0', () => console.log('echo server listening on :9443'));
-JS
-chmod 0644 /opt/passport/echo/*
-# The proxy trusts the public CAs PLUS the echo cert (for its outbound TLS to localhost:9443). Public certs only.
-cat /etc/pki/tls/certs/ca-bundle.crt /opt/passport/echo/echo-cert.pem > /opt/passport/trust.pem
-chmod 0644 /opt/passport/trust.pem
-
 # --- local HashiCorp Vault: dev mode, IN MEMORY — API credentials are lost if this container restarts --
 [ -s /opt/passport/vault.env ] || printf 'VAULT_TOKEN=%s\n' "$(openssl rand -hex 24)" > /opt/passport/vault.env
 chmod 0600 /opt/passport/vault.env
@@ -64,10 +45,11 @@ docker run -d --name pp-vault-dev --restart unless-stopped --network pp-net --ca
   hashicorp/vault:1.17.6 server -dev >/dev/null
 unset VAULT_TOKEN
 
-# --- helper: start (or restart) the proxy + echo sidecar. Run by the user after `sudo docker login`. ---
+# --- helper: start (or restart) the proxy. Run by the user after `sudo docker login`. ---
 cat > /usr/local/bin/passport-start-proxy << 'SH'
 #!/bin/bash
 # Usage: sudo passport-start-proxy      (after: sudo docker login ociregistry.usepassport.ai --username passport)
+# Starts (or restarts) the proxy. It trusts the public CAs built into its image, so public HTTPS APIs work as-is.
 set -euo pipefail
 . /opt/passport/proxy.conf
 docker pull "$IMAGE"
@@ -79,10 +61,9 @@ case "$U" in
   [0-9]*) chown "${U%%:*}" /opt/passport/keys/ca.pem /opt/passport/keys/ref.pem; chmod 0400 /opt/passport/keys/ca.pem /opt/passport/keys/ref.pem;;
   *) echo "image user '$U' is not numeric; making keys world-readable (no SSH, single-purpose host)"; chmod 0644 /opt/passport/keys/ca.pem /opt/passport/keys/ref.pem;;
 esac
-docker rm -f pp-echo pp-proxy-local >/dev/null 2>&1 || true
+docker rm -f pp-proxy-local >/dev/null 2>&1 || true
 docker run -d --name pp-proxy-local --restart unless-stopped --network pp-net -p 8443:8443 -p 8081:8081 \
   -v /opt/passport:/opt/passport:ro \
-  -e SSL_CERT_FILE=/opt/passport/trust.pem \
   -e PASSPORT_PROXY_PRIVATE_KEY_PATH=/opt/passport/keys/ca.pem \
   -e PASSPORT_PROXY_REFERENCE_PRIVATE_KEY_PATH=/opt/passport/keys/ref.pem \
   -e PASSPORT_PROXY_JWKS_URL=https://api.usepassport.ai/api/v1/bundles/.well-known/jwks.json \
@@ -93,10 +74,6 @@ docker run -d --name pp-proxy-local --restart unless-stopped --network pp-net -p
   -e VAULT_ADDR=http://pp-vault-dev:8200 \
   --env-file /opt/passport/vault.env \
   "$IMAGE" >/dev/null
-# The echo sidecar shares the proxy's network namespace ("localhost:9443" from the proxy's view).
-# Re-created together with the proxy: a restarted proxy gets a new namespace.
-docker run -d --name pp-echo --restart unless-stopped --network container:pp-proxy-local \
-  -v /opt/passport/echo:/echo:ro -w /echo node:20 node server.js >/dev/null
 sleep 5
 docker ps --format '{{.Names}}\t{{.Status}}' | grep '^pp-'
 code="$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/readyz || true)"

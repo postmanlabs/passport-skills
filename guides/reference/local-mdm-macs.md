@@ -123,25 +123,16 @@ docker exec -e PASSPORT_DIR=/cli/.passport pp-cli-linux ./passport setup \
   --management-url http://localhost:8081 --proxy-url https://localhost:8443 --no-daemon
 docker exec -e PASSPORT_DIR=/cli/.passport pp-cli-linux ./passport whoami
 docker exec -e PASSPORT_DIR=/cli/.passport pp-cli-linux ./passport request \
-  "https://localhost:9443/echo" -H "x-key: {{vault:$REF}}"
+  "https://passport-demo.mock.postman.postman.dev" -H "x-demo-api-key: {{vault:$REF}}"   # expect "key":"sdfds…","key_length":19
 ```
 
-One more wrinkle: the echo server from step 7 needs to be reachable as
-exactly `localhost` *from the proxy container's own perspective* (to match
-the endpoint's registered `host`, per step 5.2's first gotcha) — not via
-`host.docker.internal` or a container DNS name. The reliable way is to run
-the echo server as a sidecar sharing the proxy's network namespace, instead
-of directly on your Mac:
-
-```bash
-docker run -d --name pp-echo --network container:pp-proxy-local \
-  -v /tmp/pp-local/echo:/echo -w /echo node:20 node server.js
-```
+For the step 7 `curl`, use `D=~/passport-cli-dl/.passport`. The folder is
+bind-mounted, so your Mac's `curl` can read `cert.pem` and `key.pem`.
 
 Clean up the extra pieces alongside step 8's cleanup:
 
 ```bash
-docker rm -f pp-echo pp-cli-linux
+docker rm -f pp-cli-linux
 rm -rf ~/passport-cli-dl
 ```
 

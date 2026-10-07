@@ -20,6 +20,10 @@ comfort with a terminal and Docker.
 > and a real secret delivered through the proxy, confirmed by an
 > independently-computed sha256. The one path *not* covered by the main flow
 > is an MDM-managed Mac — see `guides/reference/local-mdm-macs.md` if that's you.
+>
+> **Changed 2026-10-07:** the end-to-end test now calls the public Passport
+> demo API (`https://passport-demo.mock.postman.postman.dev`) instead of a local
+> echo server. This flow has not been re-run since that change.
 
 ## If an AI coding agent is running this guide for you
 
@@ -57,23 +61,10 @@ human:
 - **Check existing state first** (containers, network, keys, CLI version)
   and reuse it; never regenerate `ref.pem` if one is registered.
 - **Never tear anything down (step 8)** until the user explicitly says so.
-- **Right after the step 7 test passes, always show the value of Passport**
-  (this is the final deliverable, not optional). Run the step 7.1 `curl` demo
-  (use the MDM `D` path if on an MDM Mac) and **print the full `curl` command
-  you ran, verbatim, in a code block** (with the real `$REF` UUID filled in, and
-  every flag: `--proxy`, `--proxy-cacert`, `--proxy-cert`, `--proxy-key`,
-  `--cacert`, `-H`, URL) next to its output, never a summary of it. Then tell
-  the user in plain words, using their real values (the secret reference UUID, the
-  sha256 the echo server logged, the cert expiry from `passport whoami`):
-  1. they only ever held a pointer (`{{vault:<uuid>}}`), never the secret;
-  2. their identity was a short-lived client cert scoped to the granted
-     method/host/path;
-  3. the proxy verified, resolved and injected the real value in flight;
-  4. the destination received the real value (matching sha256) while their
-     machine, shell history, and the agent's context never contained it.
-  Close with the 7.1 result line: a person, script, or AI agent can call an API
-  that needs a credential without ever holding it. Then remind them cleanup
-  (step 8) is pending until they say so.
+- **Right after the step 7 test passes, send the step 7.1 handoff** (the final
+  deliverable, not optional): one short message that leads with the value,
+  uses the real values, and ends with one next step. Keep details out of it
+  unless the user asks.
 - **Then offer step 7.2: help them add their own resources.** Ask which API they
   want to call (method, URL, how it takes the credential, a Vault key name);
   never ask for the secret value. Show them the step 2 table of what gets set.
@@ -197,15 +188,16 @@ docker logs pp-vault-dev 2>&1 | tail -20     # expect "Vault server started!"
 curl -s http://127.0.0.1:8200/v1/sys/health  # sealed:false, initialized:true
 ```
 
-Seed one test secret, using Vault's own CLI *inside* the container:
+Seed the demo API's **public sample key**, using Vault's own CLI *inside* the container:
 
 ```bash
 docker exec -e VAULT_ADDR=http://127.0.0.1:8200 -e VAULT_TOKEN=root-token-for-local-dev \
-  pp-vault-dev vault kv put secret/test-key value="some-local-test-value"
+  pp-vault-dev vault kv put secret/demo-api-key value="sdfdsfdsfsdfdfsdfds"
 ```
 
-This lands at `secret/data/test-key` — the default path the proxy's
-HashiCorp backend expects.
+This lands at `secret/data/demo-api-key`, the default path the proxy's
+HashiCorp backend expects. It's a known sample value; real credentials go in
+through a hidden prompt (step 7.2).
 
 ---
 
@@ -293,16 +285,15 @@ On the **Home** page: **Create Namespace** → **Add Resources** → **Manual**,
 and add:
 
 - Method: `GET`
-- Host: `localhost` **(no port — see gotcha below)**
-- Path: `/echo`
-- Secret: label it `x-key`, vault type **HashiCorp**, vault key `test-key`
+- Host: `passport-demo.mock.postman.postman.dev` **(no port; see the gotcha below)**
+- Path: `/`
+- Secret: label it `x-demo-api-key`, vault type **HashiCorp**, vault key `demo-api-key`
 
 > **Gotcha:** the proxy strips the port off the *request's* target host
 > before matching, but does **not** strip the port off the endpoint's stored
-> `host`. Register `host` as `localhost`, with no port — even though the
-> actual request in step 7 goes to `https://localhost:9443/echo`. Registering
-> `localhost:9443` will silently fail every request with `not authorized for
-> vault refs`, even though `passport whoami` looks correct.
+> `host`. Register `host` with no port. Registering `example.com:443` will
+> silently fail every request with `not authorized for vault refs`, even though
+> `passport whoami` looks correct.
 >
 > **Second gotcha:** a secret reference's vault config is encrypted
 > server-side under the public key of whichever proxy registration was
@@ -355,9 +346,9 @@ GOT=$(api GET /api/v2/tenant/config | jq -r --arg p "$PROXY_ID" '.body.data[]|se
 # 5.2 namespace, resource group, secret reference, endpoint (host WITHOUT port, see gotcha above)
 PP_USER=$(node -e 'const fs=require("fs"),os=require("os"),p=require("path");const rc=JSON.parse(fs.readFileSync(p.join(process.env.PASSPORT_DIR||p.join(os.homedir(),".passport"),"passportrc"),"utf8"));console.log(JSON.parse(Buffer.from(rc.login._profiles[0].workos.accessToken.split(".")[1],"base64url")).sub)')
 NS=$(api POST /api/v1/namespaces '{"name":"passport-proxy-local-dev-e2e","description":"Passport proxy e2e test"}' | jq -r '.body.data.id')
-RG=$(api POST /api/v1/namespaces/$NS/resource-groups '{"name":"localhost","description":"Passport proxy e2e test","source":"manual"}' | jq -r '.body.data.id')
-REF=$(api POST /api/v2/secret-references "$(jq -nc --arg ns "$NS" '{namespaceId:$ns,name:"demo",vaultType:"hashicorp",vaultKey:"test-key"}')" | jq -r '.body.data.id')
-EP=$(api POST /api/v2/resource-endpoints "$(jq -nc --arg ns "$NS" --arg r "$REF" --arg g "$RG" '{namespaceId:$ns,method:"GET",host:"localhost",path:"/echo",secrets:[{label:"x-key",secretReferenceId:$r}],resourceGroupIds:[$g]}')" | jq -r '.body.data.id')
+RG=$(api POST /api/v1/namespaces/$NS/resource-groups '{"name":"passport-demo.mock.postman.postman.dev","description":"Passport proxy e2e test","source":"manual"}' | jq -r '.body.data.id')
+REF=$(api POST /api/v2/secret-references "$(jq -nc --arg ns "$NS" '{namespaceId:$ns,name:"demo",vaultType:"hashicorp",vaultKey:"demo-api-key"}')" | jq -r '.body.data.id')
+EP=$(api POST /api/v2/resource-endpoints "$(jq -nc --arg ns "$NS" --arg r "$REF" --arg g "$RG" '{namespaceId:$ns,method:"GET",host:"passport-demo.mock.postman.postman.dev",path:"/",secrets:[{label:"x-demo-api-key",secretReferenceId:$r}],resourceGroupIds:[$g]}')" | jq -r '.body.data.id')
 
 # 5.3 grant to yourself
 GR=$(api POST /api/v2/access-grants "$(jq -nc --arg u "$PP_USER" --arg ns "$NS" --arg e "$EP" '{userId:$u,namespaceId:$ns,endpointIds:[$e],reason:"passport proxy local e2e",validity:1}')" | jq -r '.body.data[0].id')
@@ -395,145 +386,87 @@ It should show `allowedApiRefs` with your endpoint's method/host/path and
 
 ---
 
-## 7. Test it end-to-end
+## 7. Test it end to end
 
-**Never send a real-looking secret to a public host just to see it echoed
-back.** Instead, stand up a tiny local HTTPS server that only logs a sha256
-of what it received — proof the secret resolved, without ever printing it:
+The test calls the public **Passport demo API**,
+`https://passport-demo.mock.postman.postman.dev`. It replies with the first 5
+characters and the length of whatever `x-demo-api-key` it received. **It
+accepts any key**, so `"authenticated"` alone proves nothing. The proof is
+what it saw:
 
-```bash
-mkdir -p /tmp/pp-local/echo && cd /tmp/pp-local/echo
-
-cat > san.cnf << 'EOF'
-[req]
-distinguished_name = req
-x509_extensions = v3_req
-[v3_req]
-subjectAltName = @alt_names
-[alt_names]
-DNS.1 = localhost
-IP.1 = 127.0.0.1
-EOF
-openssl req -x509 -newkey rsa:2048 -keyout echo-key.pem -out echo-cert.pem -days 7 -nodes -subj "/CN=localhost" -extensions v3_req -config san.cnf
-
-cat > server.js << 'EOF'
-const https = require('https'), crypto = require('crypto'), fs = require('fs');
-const options = { key: fs.readFileSync(__dirname + '/echo-key.pem'), cert: fs.readFileSync(__dirname + '/echo-cert.pem') };
-https.createServer(options, (req, res) => {
-  const val = req.headers['x-key'] || '';
-  const sha256 = crypto.createHash('sha256').update(val).digest('hex');
-  console.log(JSON.stringify({ path: req.url, method: req.method, 'x-key-sha256': sha256, 'x-key-len': val.length }));
-  res.writeHead(200, { 'content-type': 'application/json' });
-  res.end(JSON.stringify({ ok: true, sha256 }));
-}).listen(9443, '0.0.0.0', () => console.log('echo server listening on :9443'));
-EOF
-chmod 644 echo-key.pem
-```
-
-> **Don't run this server on the host.** The proxy runs in Docker, so
-> `localhost:9443` from the proxy's point of view is its own container, not
-> your Mac. Run the echo server as a sidecar that shares the proxy's network
-> namespace (below). That's also why the endpoint host must be exactly
-> `localhost` (step 5.2).
-
-Now restart the proxy container with the echo server's self-signed cert
-trusted for outbound connections, so the proxy's TLS MITM to `localhost:9443`
-succeeds, then start the echo sidecar next to it (re-create the sidecar every
-time you re-create the proxy):
+| The API received | Response |
+|---|---|
+| the real key (Passport injected it) | `"key":"sdfds**************","key_length":19` |
+| the pointer, unchanged (no injection) | `"key":"{{vau*****…","key_length":46` |
 
 ```bash
-docker rm -f pp-proxy-local
-docker run -d --name pp-proxy-local --network pp-net \
-  -p 8443:8443 -p 8081:8081 \
-  -v /tmp/pp-local:/tmp/pp-local \
-  -e SSL_CERT_FILE=/tmp/pp-local/echo/echo-cert.pem \
-  -e PASSPORT_PROXY_PRIVATE_KEY_PATH=/tmp/pp-local/ca.pem \
-  -e PASSPORT_PROXY_REFERENCE_PRIVATE_KEY_PATH=/tmp/pp-local/ref.pem \
-  -e PASSPORT_PROXY_JWKS_URL=https://api.usepassport.ai/api/v1/bundles/.well-known/jwks.json \
-  -e PASSPORT_PROXY_ALLOWED_TEAM_IDS="<your team ID>" \
-  -e PASSPORT_PROXY_AUDIT_SINK=stdout \
-  -e PASSPORT_PROXY_DATAPLANE_CERT_SANS=localhost \
-  -e PASSPORT_PROXY_VAULT_SOURCE=hashicorp \
-  -e VAULT_ADDR=http://pp-vault-dev:8200 \
-  -e VAULT_TOKEN=root-token-for-local-dev \
-  ociregistry.usepassport.ai/passport/passport-proxy:latest
-
-# echo sidecar: shares the proxy's network namespace, so "localhost:9443" works
-docker run -d --name pp-echo --network container:pp-proxy-local \
-  -v /tmp/pp-local/echo:/echo -w /echo node:20 node server.js
+source /tmp/pp-local/ids.env                         # gives $REF (step 5.4), or take the UUID from `passport whoami`
+D=~/.passport                                        # MDM: ~/passport-cli-dl/.passport
+curl -s http://localhost:8081/ca.pem -o /tmp/pp-local/proxy-ca.pem
+R=$(curl -sS --proxy https://localhost:8443 \
+  --proxy-cacert $D/ca.pem --proxy-cert $D/cert.pem --proxy-key $D/key.pem \
+  --cacert /tmp/pp-local/proxy-ca.pem \
+  -H "x-demo-api-key: {{vault:$REF}}" \
+  https://passport-demo.mock.postman.postman.dev); echo "$R"
+echo "$R" | jq -e '(.key // "")|startswith("sdfds")' >/dev/null 2>&1 && [ "$(echo "$R" | jq .key_length)" = 19 ] \
+  && echo "INJECTED: the API received the real key" || echo "NOT injected (see the table above)"
 ```
 
-Grab the secret reference's UUID from `passport whoami`'s `allowedApiRefs`
-output (step 6; or `source /tmp/pp-local/ids.env` if you used step 5.4) and call it `REF`, then make the real request:
+`passport request "https://passport-demo.mock.postman.postman.dev" -H "x-demo-api-key: {{vault:$REF}}"`
+does the same thing through the CLI.
 
-```bash
-REF="<uuid from allowedApiRefs>"
-passport request "https://localhost:9443/echo" -H "x-key: {{vault:$REF}}"
-docker logs pp-echo 2>&1 | tail -1
-echo -n "some-local-test-value" | shasum -a 256   # must equal x-key-sha256
-```
+- **`{{vault:...}}` must hold the reference's UUID**, not its name. Anything
+  else passes through unchanged, with no error.
+- **The demo API isn't in the daemon's `NO_PROXY` list,** so after setup the
+  daemon form works too, with no flags: in a new terminal,
+  `curl -sS -H "x-demo-api-key: {{vault:$REF}}" https://passport-demo.mock.postman.postman.dev`
+  (step 7.2 explains the daemon).
 
-> `{{vault:...}}` **must** contain the secret reference's UUID, not its
-> friendly name — anything else streams through unsubstituted with no error.
-
-If you see a sha256 hash logged by the echo server (not the literal string
-`{{vault:...}}`), the secret was resolved and injected correctly — **that's
-a complete, verified end-to-end setup.**
-
-**Next, do step 7.1 right away** — it's the payoff of the whole setup (the same
-call with a plain `curl`, showing you used a secret you never saw).
+`INJECTED` means **a complete, verified end-to-end setup.** Send the 7.1 handoff next.
 
 ---
 
-### 7.1 The value of Passport: use a secret you never see
+### 7.1 Handoff: show the value, briefly
 
-`passport request` is a thin wrapper. This plain `curl` does the same thing
-(verified; `D` is the CLI's credentials folder: `~/.passport`, or
-`~/passport-cli-dl/.passport` on the MDM path):
+One short message, with the real values. **Lead with the value**, and keep the
+details out unless the user asks.
 
-```bash
-source /tmp/pp-local/ids.env     # gives $REF, the secret reference UUID
-D=~/passport-cli-dl/.passport
-curl -s http://localhost:8081/ca.pem -o /tmp/pp-local/proxy-ca.pem
+> **✅ Passport is working. You just called an API with a key you never had.**
+>
+> | | Without Passport | With Passport |
+> |---|---|---|
+> | Your script or AI agent holds | the real API key | only a pointer: `{{vault:<REF>}}` |
+> | If it leaks | anyone can use the key, anywhere | useless outside the one granted endpoint |
+> | To revoke or rotate | update every laptop, script and CI job | change it once, centrally |
+>
+> **Proof.** You sent only the pointer, and the API received the real key:
+> ```
+> curl --proxy https://localhost:8443 … -H "x-demo-api-key: {{vault:<REF>}}" https://passport-demo.mock.postman.postman.dev
+> → {"status":"authenticated","key":"sdfds**************","key_length":19}
+> ```
+> (If the pointer had reached the API unchanged, it would show `"key":"{{vau…","key_length":46`.)
+>
+> **Try it on your own API?** Tell me the URL and how it takes the key (for
+> example `Authorization: Bearer`). You'll store the key yourself through a
+> hidden prompt, never in this chat, and I'll do the rest.
+>
+> <sub>Running locally: proxy + Vault in Docker · nothing is deleted until you ask.</sub>
 
-curl -sS --proxy https://localhost:8443 \
-  --proxy-cacert $D/ca.pem --proxy-cert $D/cert.pem --proxy-key $D/key.pem \
-  --cacert /tmp/pp-local/proxy-ca.pem \
-  -H "x-key: {{vault:$REF}}" \
-  https://localhost:9443/echo
-```
-
-Output: `{"ok":true,"sha256":"a91317c5…a1f8"}`, the sha256 of the real secret
-(`some-local-test-value`).
-
-**How the secret was used without being seen**
-
-1. **You only hold a pointer.** The header you sent is
-   `x-key: {{vault:<uuid>}}`. The UUID names a secret; it isn't the secret.
-   **Your machine, shell history and this guide never contain the value.**
-2. **Your identity is a short-lived client cert.** `passport setup` issued
-   `cert.pem` (about 5 min). It encodes *which* references you may use, on
-   *which* method, host and path (`GET localhost/echo`). That's the grant
-   from 5.3. **Access is scoped to exactly what you were granted.**
-3. **The proxy checks, then swaps.** It verifies your cert, confirms the
-   request matches your grant, decrypts the reference to learn where the
-   secret lives (`test-key` in Vault), fetches it, and replaces
-   `{{vault:<uuid>}}` with the real value *in flight*, only for the allowed
-   host and path. **The real value is injected by the proxy, never by you.**
-4. **The destination gets the real value.** The echo server received it
-   (its hash matches ours). **Your side saw only the UUID going out and the
-   response coming back.**
-
-**Result: you (or a script, or an AI agent) can call an API that needs a
-credential without ever holding that credential.** **It can't be leaked from
-your machine**, **it works only on endpoints you were granted**, and
-**access ends when the cert or grant expires.**
+Rules for this message:
+- **One next step:** their own API (7.2). Offer the protection demos (7.3) only
+  after that works, or if they ask.
+- **Be honest about the demo key.** It's the demo API's public sample key, so it
+  appears in this guide. With their own key (7.2) the value goes only into a
+  hidden prompt, and never into their shell history or this conversation. Say so
+  if they ask, or if it's relevant.
+- **On request only:** the full `curl` with every flag, what each flag does,
+  certificate expiry and renewal, and the daemon.
 
 ---
 
 ### 7.2 Add your own resources (call a real API through Passport)
 
-The e2e test used a local echo server. Next, put one of *your* APIs behind the
+The e2e test used the Passport demo API. Next, put one of *your* APIs behind the
 proxy, so you can try it with a credential you actually use.
 
 **1. Decide what to call.** You need four things, and none of them is the
@@ -685,8 +618,8 @@ curl -sS -H "Authorization: Bearer {{vault:<REF_N>}}" "https://api.github.com/us
 never through Passport: `localhost`, `127.0.0.1`, `::1`, private IP ranges,
 `.local`, `.internal`, `.svc`, `.cluster.local`, `.postmanlabs.com` (and its
 `-beta`/`-stage` variants) and `.usepassport.ai` (and its `-beta`/`-stage`
-variants). So the step 7 `localhost:9443` echo test, or an API on
-those domains, needs the explicit curl from step 3.
+variants). An API on those hosts needs the explicit curl from step 3. The
+step 7 demo API isn't on the list, so the daemon form works for it.
 `passport daemon stop` stops the daemon.
 
 > **Verified 2026-10-06** on the MDM container path (daemon started by hand) against `postman-echo.com`
@@ -801,7 +734,7 @@ passport daemon stop
 Then:
 
 ```bash
-docker rm -f pp-echo pp-proxy-local pp-vault-dev
+docker rm -f pp-proxy-local pp-vault-dev
 docker network rm pp-net
 rm -rf /tmp/pp-local
 ```

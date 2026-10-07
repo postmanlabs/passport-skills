@@ -88,7 +88,7 @@ REPO=<repo>; . "$REPO/scripts/env.sh"
 pp() { docker exec -e PASSPORT_DIR=/cli/.passport pp-cli-linux ./passport "$@"; }   # a function, not a string: zsh won't split a stored command
 pp setup --management-url https://$CF_DOMAIN --proxy-url https://$PROXY_HOST:8443 --no-daemon
 pp whoami
-pp request "https://localhost:9443/echo" -H "x-key: {{vault:$REF}}"
+pp request "https://passport-demo.mock.postman.postman.dev" -H "x-demo-api-key: {{vault:$REF}}"   # expect "key":"sdfds…","key_length":19
 ```
 
 For the explicit `curl` (steps 8.2 and 10), use `~/passport-cli-dl/.passport` in
