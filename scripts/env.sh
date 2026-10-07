@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Source at the top of every command block of guides/aws-single-instance.md (each agent command runs in a fresh shell):
 #   REPO=<absolute repo path>; . "$REPO/scripts/env.sh"
 # Loads the deployment manifest (/tmp/pp-aws/state.env) and defines: st (record), api (Passport Cloud), onhost (SSM Run Command).
