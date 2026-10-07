@@ -19,12 +19,12 @@ The person running this is usually **evaluating Passport, often as a potential c
 working proxy is the start, not the finish line. Once the e2e test passes, your job is to help
 them see, on their own APIs, what Passport does for them, and to help as much as you can.
 
-1. **Show the demo** (local step 7.1 / AWS step 8.1): the full `curl`, verbatim, and the four
-   plain-words points.
-2. **Offer to add their own API** (local step 7.2 / AWS step 9). Ask what they want to call and
+1. **Show the demo** (local step 7.1 / AWS step 9, the mandatory handoff): the full `curl`, verbatim,
+   and what each part did.
+2. **Offer to add their own API** (local step 7.2 / AWS step 10). Ask what they want to call and
    how it takes the credential. Never ask for the secret value; they store it themselves. Give
    both full `curl` forms: with the proxy and cert flags, and the env-var/daemon form.
-3. **Offer the protection demos** (local step 7.3 / AWS step 9.5), one at a time:
+3. **Offer the protection demos** (local step 7.3 / AWS step 11), one at a time:
    - a leaked pointer is useless on any other host or path;
    - every call is audited, with no secret in the logs;
    - revoking a grant ends access;
@@ -41,8 +41,19 @@ still waits until they say so.
 ## Ground rules (apply to everything here)
 - **Use only this repo's files** (`guides/`, `scripts/`, `templates/`) as the source. If something is
   missing, ask the user — don't search elsewhere.
-- **Ask before every cloud (AWS) change.** Show the exact commands and get a yes first. Read-only commands
-  run freely.
+- **Discover before asking.** Check installed tools, profiles, regions, login state and existing resources
+  first; infer routine choices and state them; ask only for what's genuinely missing, in one go.
+- **Ask before every cloud change, naming every resource.** Show a table of exactly what will be created or
+  deleted (type, name, ID, account, region) plus the full commands, and get one yes per block. Read-only
+  commands run freely. A "yes"/"go ahead" approves that block: run it, verify it, report, all in that turn.
+- **Passport API and CLI calls are yours.** Register the proxy, create and delete namespaces, resource groups,
+  references, endpoints and grants, and run `passport setup`/`whoami`/`request`/`daemon`/`ca status`
+  yourself. Don't ask permission and don't ask the user to run them; report what you did. The only Passport
+  steps for the human are browser approvals, `sudo` (`passport ca install`) and typing secret values.
+- **The human types into their own terminal.** You can't type into theirs and they can't type into yours:
+  give exact commands for anything needing sudo, a password, a browser or a secret value.
+- **Don't call it done early.** "An explicit curl works" is not "CLI and daemon fully configured"; report
+  each check separately (AWS step 8.5).
 - **Never print or paste secrets:** registry key, private keys, Vault tokens, login tokens. Compare sha256s
   instead. Never put a secret in user-data, a commit, or chat.
 - **Never tear anything down** until the user explicitly says so.
@@ -52,5 +63,6 @@ still waits until they say so.
 
 ## Layout
 - `guides/` — the step-by-step guides; `guides/reference/` — troubleshooting and MDM-Mac details
-- `scripts/` — `preflight.sh` (read-only AWS checks), `passport-api.js` (Passport Cloud API helper)
-- `templates/` — EC2 user-data and CloudFront files used by the AWS guide
+- `scripts/` — `preflight.sh` (read-only AWS checks + free name), `env.sh` (shared helpers), `aws-resources.sh`
+  (what exists / what cleanup would delete, tag-checked), `passport-api.js` (Passport Cloud API helper)
+- `templates/` — EC2 user-data, CloudFront files, and `operator-iam-policy.json` (the AWS permissions the guide needs)

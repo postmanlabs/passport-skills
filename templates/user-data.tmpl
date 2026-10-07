@@ -1,33 +1,42 @@
 #!/bin/bash
+# First-boot bootstrap for the Passport proxy host. Contains NO secrets:
+#  - generates the proxy's bootstrap keys ON the instance (kept on its disk, survive container restarts)
+#  - starts a local HashiCorp Vault (dev mode, in memory) — the only secret backend for API credentials
+#  - installs helper scripts; the proxy itself is started later by the user, after an interactive
+#    `docker login` (the registry key never passes through user-data, SSM parameters or chat)
 set -euo pipefail
 exec > >(tee /var/log/passport-bootstrap.log) 2>&1
-# no `set -x`: it would write the Vault token and key handling into the log and the EC2 console output
+# no `set -x`: it would copy the Vault token into this log and the EC2 console output
 
-REGION=__REGION__
-PREFIX=__PREFIX__
 ORG=__ORG__
 SANS=__SANS__
-IMAGE=ociregistry.usepassport.ai/passport/passport-proxy:latest
 
 dnf -y -q install docker jq openssl
 systemctl enable --now docker
-mkdir -p /opt/passport/echo /run/passport
 
-sm() { aws secretsmanager get-secret-value --region "$REGION" --secret-id "$PREFIX/$1" --query SecretString --output text; }
+install -d -m 0755 /opt/passport /opt/passport/echo
+install -d -m 0711 /opt/passport/keys          # traversable, not listable, by the proxy's non-root user
+
+# --- proxy bootstrap keys (on disk, never in AWS) ----------------------------------------------
+# Only created if missing, so a reboot or re-run never replaces them (replacing ref.pem would break
+# every secret reference registered for this proxy).
 umask 077
-sm ca-key        > /opt/passport/ca.pem
-sm reference-key > /opt/passport/ref.pem
-# The proxy container runs as a NON-root user, so the key files must be readable by it. This is safe here:
-# the instance has no SSH, only root (and SSM) can reach /opt/passport, and nothing else runs on the host.
-chmod 0644 /opt/passport/ca.pem /opt/passport/ref.pem
-sm registry-key  | docker login ociregistry.usepassport.ai --username passport --password-stdin
-docker pull "$IMAGE"
-docker pull hashicorp/vault:1.17.6
-docker pull node:20
+[ -s /opt/passport/keys/ca.pem ]  || openssl genrsa -out /opt/passport/keys/ca.pem 2048
+[ -s /opt/passport/keys/ref.pem ] || openssl genrsa -out /opt/passport/keys/ref.pem 2048
+openssl rsa -in /opt/passport/keys/ref.pem -pubout -out /opt/passport/reference-public-key.pem 2>/dev/null
+chmod 0644 /opt/passport/reference-public-key.pem   # public half: this is what gets registered with Passport Cloud
 
-# Echo server for the end-to-end test: self-signed cert for "localhost", logs only a sha256 of x-key.
+# --- proxy settings (no secrets) ----------------------------------------------------------------
+cat > /opt/passport/proxy.conf << EOF
+ORG=$ORG
+SANS=$SANS
+IMAGE=ociregistry.usepassport.ai/passport/passport-proxy:latest
+EOF
+chmod 0644 /opt/passport/proxy.conf
+
+# --- echo server for the end-to-end test (logs only a sha256 of x-key / authorization) ------------
 openssl req -x509 -newkey rsa:2048 -keyout /opt/passport/echo/echo-key.pem -out /opt/passport/echo/echo-cert.pem \
-  -days 7 -nodes -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+  -days 30 -nodes -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" 2>/dev/null
 cat > /opt/passport/echo/server.js << 'JS'
 const https = require('https'), crypto = require('crypto'), fs = require('fs');
 const options = { key: fs.readFileSync(__dirname + '/echo-key.pem'), cert: fs.readFileSync(__dirname + '/echo-cert.pem') };
@@ -36,28 +45,46 @@ https.createServer(options, (req, res) => {
   const sha256 = crypto.createHash('sha256').update(val).digest('hex');
   console.log(JSON.stringify({ path: req.url, method: req.method, 'x-key-sha256': sha256, 'x-key-len': val.length }));
   res.writeHead(200, { 'content-type': 'application/json' });
-  res.end(JSON.stringify({ ok: true, sha256 }));
+  res.end(JSON.stringify({ ok: true, path: req.url, sha256 }));
 }).listen(9443, '0.0.0.0', () => console.log('echo server listening on :9443'));
 JS
-chmod 644 /opt/passport/echo/echo-key.pem
-# Proxy trusts the normal public CAs PLUS the echo cert (so its outbound TLS to localhost:9443 succeeds).
+chmod 0644 /opt/passport/echo/*
+# The proxy trusts the public CAs PLUS the echo cert (for its outbound TLS to localhost:9443). Public certs only.
 cat /etc/pki/tls/certs/ca-bundle.crt /opt/passport/echo/echo-cert.pem > /opt/passport/trust.pem
-chmod 0644 /opt/passport/trust.pem   # public certs only; must be readable by the non-root proxy (umask 077 above)
+chmod 0644 /opt/passport/trust.pem
 
-# Local HashiCorp Vault (dev mode, in-memory). Not published on any host port: only the proxy can reach it.
-VAULT_TOKEN=$(openssl rand -hex 24)
-printf 'VAULT_TOKEN=%s\n' "$VAULT_TOKEN" > /opt/passport/vault.env
-docker network create pp-net
+# --- local HashiCorp Vault: dev mode, IN MEMORY — API credentials are lost if this container restarts --
+[ -s /opt/passport/vault.env ] || printf 'VAULT_TOKEN=%s\n' "$(openssl rand -hex 24)" > /opt/passport/vault.env
+chmod 0600 /opt/passport/vault.env
+docker network inspect pp-net >/dev/null 2>&1 || docker network create pp-net
+. /opt/passport/vault.env
+docker rm -f pp-vault-dev >/dev/null 2>&1 || true
 docker run -d --name pp-vault-dev --restart unless-stopped --network pp-net --cap-add=IPC_LOCK \
   -e VAULT_DEV_ROOT_TOKEN_ID="$VAULT_TOKEN" -e VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200 \
-  hashicorp/vault:1.17.6 server -dev
-sleep 3
+  hashicorp/vault:1.17.6 server -dev >/dev/null
+unset VAULT_TOKEN
 
+# --- helper: start (or restart) the proxy + echo sidecar. Run by the user after `sudo docker login`. ---
+cat > /usr/local/bin/passport-start-proxy << 'SH'
+#!/bin/bash
+# Usage: sudo passport-start-proxy      (after: sudo docker login ociregistry.usepassport.ai --username passport)
+set -euo pipefail
+. /opt/passport/proxy.conf
+docker pull "$IMAGE"
+docker logout ociregistry.usepassport.ai >/dev/null 2>&1 || true    # don't keep the registry key on disk after the pull
+# Give the proxy's non-root user read access to its keys, and nobody else.
+U="$(docker image inspect -f '{{.Config.User}}' "$IMAGE")"
+case "$U" in
+  ''|root|0|0:*) echo "image runs as root; keys stay 0600 root";;
+  [0-9]*) chown "${U%%:*}" /opt/passport/keys/ca.pem /opt/passport/keys/ref.pem; chmod 0400 /opt/passport/keys/ca.pem /opt/passport/keys/ref.pem;;
+  *) echo "image user '$U' is not numeric; making keys world-readable (no SSH, single-purpose host)"; chmod 0644 /opt/passport/keys/ca.pem /opt/passport/keys/ref.pem;;
+esac
+docker rm -f pp-echo pp-proxy-local >/dev/null 2>&1 || true
 docker run -d --name pp-proxy-local --restart unless-stopped --network pp-net -p 8443:8443 -p 8081:8081 \
   -v /opt/passport:/opt/passport:ro \
   -e SSL_CERT_FILE=/opt/passport/trust.pem \
-  -e PASSPORT_PROXY_PRIVATE_KEY_PATH=/opt/passport/ca.pem \
-  -e PASSPORT_PROXY_REFERENCE_PRIVATE_KEY_PATH=/opt/passport/ref.pem \
+  -e PASSPORT_PROXY_PRIVATE_KEY_PATH=/opt/passport/keys/ca.pem \
+  -e PASSPORT_PROXY_REFERENCE_PRIVATE_KEY_PATH=/opt/passport/keys/ref.pem \
   -e PASSPORT_PROXY_JWKS_URL=https://api.usepassport.ai/api/v1/bundles/.well-known/jwks.json \
   -e PASSPORT_PROXY_ALLOWED_TEAM_IDS="$ORG" \
   -e PASSPORT_PROXY_AUDIT_SINK=stdout \
@@ -65,9 +92,43 @@ docker run -d --name pp-proxy-local --restart unless-stopped --network pp-net -p
   -e PASSPORT_PROXY_VAULT_SOURCE=hashicorp \
   -e VAULT_ADDR=http://pp-vault-dev:8200 \
   --env-file /opt/passport/vault.env \
-  "$IMAGE"
-
-# Echo sidecar shares the proxy's network namespace, so "localhost:9443" is reachable AS localhost from the proxy.
+  "$IMAGE" >/dev/null
+# The echo sidecar shares the proxy's network namespace ("localhost:9443" from the proxy's view).
+# Re-created together with the proxy: a restarted proxy gets a new namespace.
 docker run -d --name pp-echo --restart unless-stopped --network container:pp-proxy-local \
-  -v /opt/passport/echo:/echo -w /echo node:20 node server.js
-echo "passport-bootstrap: done"
+  -v /opt/passport/echo:/echo:ro -w /echo node:20 node server.js >/dev/null
+sleep 5
+docker ps --format '{{.Names}}\t{{.Status}}' | grep '^pp-'
+code="$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/readyz || true)"
+echo "readyz=$code"; [ "$code" = 200 ]
+SH
+
+# --- helper: store an API credential in Vault from a HIDDEN prompt (value never on the command line) ---
+cat > /usr/local/bin/passport-vault-put << 'SH'
+#!/bin/bash
+# Usage: sudo passport-vault-put <vault-key>       e.g.  sudo passport-vault-put example-api-token
+set -euo pipefail
+KEY="${1:?usage: passport-vault-put <vault-key>}"
+case "$KEY" in *[!A-Za-z0-9._/-]*|/*|*..*) echo "invalid key name: $KEY" >&2; exit 2;; esac
+read -rsp "Value for secret/$KEY (input hidden): " VAL; echo
+[ -n "$VAL" ] || { echo "empty value, nothing stored" >&2; exit 1; }
+. /opt/passport/vault.env
+printf '%s' "$VAL" | docker exec -i -e VAULT_ADDR=http://127.0.0.1:8200 -e VAULT_TOKEN="$VAULT_TOKEN" pp-vault-dev \
+  vault kv put "secret/$KEY" value=- >/dev/null
+unset VAL VAULT_TOKEN
+echo "stored secret/$KEY  (vaultKey for the Passport secret reference: $KEY)"
+SH
+
+# --- helper: sha256 of a stored value, to verify without printing it ---------------------------------
+cat > /usr/local/bin/passport-vault-sha256 << 'SH'
+#!/bin/bash
+set -euo pipefail
+KEY="${1:?usage: passport-vault-sha256 <vault-key>}"
+. /opt/passport/vault.env
+V="$(docker exec -e VAULT_ADDR=http://127.0.0.1:8200 -e VAULT_TOKEN="$VAULT_TOKEN" pp-vault-dev \
+  vault kv get -field=value "secret/$KEY")" || { echo "could not read secret/$KEY (lost after a Vault restart?)" >&2; exit 1; }
+printf '%s' "$V" | sha256sum | awk '{print $1}'; unset V
+SH
+chmod 0755 /usr/local/bin/passport-start-proxy /usr/local/bin/passport-vault-put /usr/local/bin/passport-vault-sha256
+
+echo "passport-bootstrap: done (proxy not started yet: run 'sudo docker login …' then 'sudo passport-start-proxy')"

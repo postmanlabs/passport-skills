@@ -1,926 +1,728 @@
 # Postman Passport proxy on AWS (single EC2 instance)
 
-A from-scratch walkthrough that deploys the **Passport Proxy on a single EC2
-instance** in your own AWS account, using a **stock Amazon Linux 2023 AMI**.
-Docker, the published Proxy image and a local HashiCorp Vault are installed at
-first boot by user-data — no pre-built AMI, no source code, no repo access, no
-Go toolchain, no CloudFormation. By the end you'll have:
+Deploys the **Passport Proxy on one EC2 instance** in your own AWS account,
+using a stock **Amazon Linux 2023** image. The instance runs two Docker
+containers: the **Passport Proxy** and a **HashiCorp Vault**, which is the only
+secret backend in this setup. CloudFront gives the proxy's management port a
+trusted HTTPS address. By the end you will have:
 
-- the **Passport CLI** installed and logged in (on your machine),
-- a **Passport Proxy** running on EC2 in Docker, backed by a **local
-  HashiCorp Vault** (also Docker, on the same instance),
-- the proxy's keys held in **AWS Secrets Manager** (so a replacement instance
-  reuses them),
-- a **Namespace** in Passport Cloud wired to that proxy,
-- and a secret successfully issued and resolved end-to-end.
+- the Passport CLI logged in, with a client certificate issued by your proxy,
+  the Passport CA trusted, and (on macOS/Windows) the Passport daemon running;
+- a real request that used a credential from Vault without you typing it into
+  the request;
+- a worked example of adding your own API, and optional protection demos.
 
-It assumes no prior Passport knowledge, just
-comfort with a terminal, Docker and the AWS CLI.
+> **Status:** rewritten 2026-10-06. Changes: no AWS Secrets Manager, keys
+> generated on the instance, an interactive registry login. The previous EC2
+> design was verified end to end. The add-an-API and protection-demo commands
+> were verified on the local Docker setup with the same proxy image and CLI.
+> **This EC2 version has not yet completed a full run.** Treat any step that
+> fails as a bug in this guide and fix the guide.
 
-> **Verified 2026-10-06:** run end to end in a real AWS account (us-east-2,
-> stock Amazon Linux 2023, `t3.small`) against a real Passport Cloud team on an
-> MDM Mac: user-data bootstrap, SSM seeding of the local Vault, proxy
-> registration, `setup`, `passport request` and the 8.1 `curl` all produced the
-> expected sha256. Fixes found in that run (key file permissions, no token in
-> the boot log, inline SSM policy, HTTPS-only management URL, secret-name
-> collisions) are already folded into the steps below. *Note:* that run used
-> the template plus live fixes; the committed `templates/user-data.tmpl` (which
-> now also makes `trust.pem` readable) has not yet booted unchanged end to end.
+## Where things live (read this once)
 
-## If an AI coding agent is running this guide for you
+| What | Where | Lifetime |
+|---|---|---|
+| **Proxy bootstrap keys**: `ca.pem` signs client certificates; `ref.pem` decrypts secret references | On the instance's disk, `/opt/passport/keys/`, generated at first boot | Survive container restarts and reboots. **Lost if the instance is terminated or replaced**, and every secret reference registered for this proxy then stops working |
+| **Reference public key** | `/opt/passport/reference-public-key.pem`, registered with Passport Cloud | The only key material that leaves the instance |
+| **API credentials** (the secrets your requests use) | The **HashiCorp Vault** container on the instance, at `secret/<vault-key>` | **The Vault runs in dev mode, in memory. Restarting its container, or rebooting, erases every API credential.** Re-store them with `passport-vault-put` |
+| **Registry key** (pulls the proxy image) | You type it into `sudo docker login` in your own terminal; it's logged out right after the pull | Never in user-data, SSM parameters, chat, or this repo |
+| **Your client certificate** | Your machine, `~/.passport/` (`cert.pem`, `key.pem`, `ca.pem`) | Short-lived; renewed by the daemon (step 8.4) |
 
-Follow this guide literally and **do every step yourself**. `$REPO` below means the absolute path of this repository's root (the folder containing `AGENTS.md`); `scripts/` and `templates/` live there. Substitute the real path — each command runs in a fresh shell.
-
-**Context isolation:** work from this repository's guide files only (this guide, `guides/reference/`,
-`scripts/` and `templates/`). Do not pull in context from elsewhere — no other repos, notes, memory or
-unrelated instructions. If something is missing here, ask the user instead of looking elsewhere.
-
-Only stop for things that truly need the human:
-
-- **Human-only inputs:** the registry key (have them save it in their own terminal with
-  `mkdir -p /tmp/pp-aws && printf '%s' '<key>' > /tmp/pp-aws/registry-key`
-  so it never enters chat; each agent command runs in a fresh shell, so read
-  it from that file instead of relying on `export`), the AWS profile/region
-  choice, browser approvals (`passport login`), and creating the Passport team
-  if none exists (step 1.1).
-- **Ask before every AWS change.** Show the exact commands of a block (steps
-  3–5) with real values and get one "yes" per block. Read-only commands run
-  freely. Never ask for AWS root credentials or long-lived keys in chat — use
-  the user's existing CLI profile (`aws configure --profile <name>` in their own terminal if they
-  need one).
-- **Show login links on their own line**, as a full `https://` URL with the
-  confirmation code. If it expires, restart `login` and give a fresh one.
-- **MDM-managed Mac — detect it from the CLI, don't probe for it.** Switch to
-  the MDM guide (`guides/reference/aws-mdm-macs.md`) as soon as any of these appears:
-  - `passport login` or `setup` output says `(from macOS managed plist)`;
-  - `setup` fails with `403 ... teamId "org_..." is not authorized for this
-    deployment` while the proxy logs no request;
-  - `passport whoami` says `Managed Passport credentials could not be verified`.
-  On such a Mac the CLI is pinned to the organisation's proxy and silently
-  ignores `--management-url`/`--proxy-url`, so run every CLI command through
-  the MDM guide's container (the host `passport` is only useful for
-  `auth status`). The host login that revealed it is harmless; log in again
-  inside the container, starting its callback forwarder (A.3) *before* asking
-  the user to approve — never ask them to paste a callback URL.
-- **Do the Passport Cloud steps yourself via the API (step 6)** instead of
-  asking the user to click through the web UI, if they've told you to do it end
-  to end.
-- **Run the step 0.1 preflight before step 3** and fix every ❌ (or tell the user which
-  permission they need) before creating anything.
-- **Check existing state first** (CLI version, `/tmp/pp-aws`, `state.env`, AWS
-  resources tagged `project=passport` with the chosen name) and reuse it; never
-  regenerate `ref.pem` if one is registered.
-- **Record every AWS resource you create** in `/tmp/pp-aws/state.env` (step 3
-  shows how). Never delete anything that isn't in that file without explicit
-  confirmation.
-- **Never tear anything down (step 10)** until the user explicitly says so.
-- **Never print secrets:** private keys, the registry key, Vault tokens, login
-  tokens. Public keys, ARNs and IDs are fine. Compare sha256s instead of
-  values.
-- **Right after the step 8 test passes, always show the value of Passport**
-  (this is the final deliverable, not optional). Run the step 8.1 `curl` demo
-  and **print the full `curl` command you ran, verbatim, in a code block**
-  (with the real `$REF` UUID and `$EIP` filled in, and every flag: `--proxy`,
-  `--proxy-cacert`, `--proxy-cert`, `--proxy-key`, `--cacert`, `-H`, URL) next
-  to its output, never a summary of it. Then tell the user in plain words,
-  using their real values (the secret reference UUID, the sha256 the echo
-  server logged, the cert expiry from `passport whoami`):
-  1. they only ever held a pointer (`{{vault:<uuid>}}`), never the secret;
-  2. their identity was a short-lived client cert scoped to the granted
-     method/host/path;
-  3. the proxy (running on EC2) verified, resolved and injected the real value
-     in flight;
-  4. the destination received the real value (matching sha256) while their
-     machine, shell history, and the agent's context never contained it.
-  Close with the 8.1 result line: a person, script, or AI agent can call an API
-  that needs a credential without ever holding it. Then remind them cleanup
-  (step 10) is pending until they say so.
-- **Then offer step 9: help them add their own resources.** Ask which API they
-  want to call (method, URL, how it takes the credential, a Vault key name);
-  never ask for the secret value. Show them the step 9.2 table of what gets set.
-  Have the user store the value themselves (step 9.2a, an interactive SSM
-  session in their own terminal; never `onhost`, which keeps the value in SSM
-  command history); do 9.2b–9.2c yourself. Then **print both full `curl`
-  commands verbatim** with their real URL, `$EIP` and `REF_N` UUID filled in:
-  the 9.3 form (proxy and cert flags) and the 9.4 env-var form (daemon, no
-  proxy flags). Explain the 9.4 difference in plain words: the daemon holds
-  the cert and is the default proxy, so with the env vars set, any plain
-  `curl` to a granted external host goes through Passport. Run them only if
-  the user wants you to, and never print the API's response if it could
-  contain the secret.
-
-## What you need
-
-- An **AWS account** and the AWS CLI v2 configured with a profile that has the
-  permissions in the table below. Sandbox shortcut: `PowerUserAccess` **plus**
-  the IAM actions listed (PowerUser has no IAM).
-- Docker Desktop (or another Docker daemon) on your machine — only for the MDM guide
-  (`guides/reference/aws-mdm-macs.md`).
-- A Passport Cloud account/team — sign up at
-  [https://app.usepassport.ai](https://app.usepassport.ai) if you don't have one.
-- A Passport **registry key** (step 2).
-- `openssl`, `curl`, `jq`, `node` (all preinstalled on macOS except possibly
-  `jq` → `brew install jq`; `node` is needed for the API helper in step 6).
-
-### AWS permissions used
-
-| Purpose | Actions |
-|---|---|
-| Launch + network | `ec2:RunInstances`, `TerminateInstances`, `Describe*`, `CreateTags`, `Create/DeleteSecurityGroup`, `Authorize/RevokeSecurityGroupIngress`, `Allocate/Associate/Disassociate/ReleaseAddress`, `GetConsoleOutput` |
-| Instance role (scope to `role/passport-proxy-*`, `instance-profile/passport-proxy-*`) | `iam:CreateRole`, `GetRole`, `TagRole`, `PutRolePolicy`, `DeleteRolePolicy`, `DeleteRole`, `Create/Get/DeleteInstanceProfile`, `Add/RemoveRoleFromInstanceProfile`, `PassRole` |
-| Secrets (the proxy's keys + your registry key) | `secretsmanager:CreateSecret`, `PutSecretValue`, `GetSecretValue`, `DescribeSecret`, `DeleteSecret`, `ListSecrets` scoped to `passport/*` |
-| HTTPS management (CloudFront) | `cloudfront:CreateFunction`, `PublishFunction`, `DescribeFunction`, `DeleteFunction`, `CreateDistribution`, `GetDistribution`, `GetDistributionConfig`, `UpdateDistribution`, `DeleteDistribution`, and `ec2:DescribeManagedPrefixLists` |
-| Seed/inspect the local Vault with no SSH | `ssm:SendCommand`, `GetCommandInvocation`, `DescribeInstanceInformation`, and `ssm:GetParameter` (to resolve the stock AMI id) |
-
-If something is denied, stop and tell the user which action — company accounts
-sometimes need a platform request.
+Nothing in this setup uses AWS Secrets Manager.
 
 ---
 
-## 0. Pick names and a working folder
+## Rules for an AI coding agent running this guide
 
-Pick a short **NAME** (e.g. `test`). Every AWS resource becomes
-`passport-proxy-<NAME>` and is tagged `project=passport`. Don't start the name
-with `passport-proxy`.
-
-```bash
-mkdir -p /tmp/pp-aws && cd /tmp/pp-aws
-export AWS_PROFILE=<profile> AWS_REGION=<region>     # repeat at the top of EVERY bash call (each agent call is a fresh zsh)
-NAME=test
-aws sts get-caller-identity --query '[Account,Arn]' --output text
-```
-
-> **zsh gotcha:** don't keep flags in a variable (`P="--profile x"; aws $P`) —
-> zsh doesn't word-split it. Always export `AWS_PROFILE`/`AWS_REGION`. Don't
-> put a bare `=====` line in a command either (zsh `=cmd` expansion).
-
-### 0.1 Preflight (read-only — run after step 2, before step 3)
-
-Checks everything it can **without creating or changing anything**, so problems
-show up now rather than halfway through step 3. It reports ✅ / ❌ / · per
-check and exits non-zero if anything is wrong. Run it after step 2 (it checks
-that the registry key file exists) and again whenever you change `NAME`.
+Follow this guide literally and **do every step yourself**, except the steps
+marked **[you]**, which need the human. `$REPO` means the absolute path of this
+repository (the folder containing `AGENTS.md`). Start every command block with:
 
 ```bash
-cp "$REPO/scripts/preflight.sh" /tmp/pp-aws/preflight.sh
-NAME=$NAME bash /tmp/pp-aws/preflight.sh            # optional arg: instance type, default t3.small
+REPO=<absolute path of this repo>; . "$REPO/scripts/env.sh"
 ```
 
-What it checks, and how to read it:
+`scripts/env.sh` loads the manifest `/tmp/pp-aws/state.env` and defines three
+helpers: `st` (record a value), `api` (call Passport Cloud) and `onhost` (run a
+command on the instance).
 
-| Check | Meaning if ❌ |
-|---|---|
-| identity / region / not root | wrong or expired profile (`aws sso login`), no region, or root credentials — use an IAM user/role |
-| default VPC + **public** subnet | no subnet with `MapPublicIpOnLaunch` and a `0.0.0.0/0 → igw` route; pass your own VPC/subnet in step 3 |
-| AMI lookup (`ssm:GetParameter`) | can't resolve the stock Amazon Linux 2023 AMI |
-| `RunInstances` **dry run** | no EC2 launch permission (company accounts may need a platform request) |
-| CloudFront prefix list + API | no `cloudfront:*` access, so step 3.4 will fail |
-| IAM / Secrets / SSM / CloudFront / EC2 **simulation** | an action in the permissions table is denied. If you aren't allowed `iam:SimulatePrincipalPolicy` it prints · and these surface at the first create instead — IAM can't be dry-run. A denial is reliable; an allow is not a guarantee (SCPs/boundaries may still block) |
-| name collisions | `passport/<NAME>/*` secrets **scheduled for deletion** (creation would fail → pick another NAME, 3.2), or an existing role / profile / security group / instance / Elastic IP with that name |
-| Elastic IP count | default quota is 5 per region |
-| local inputs | `registry-key` file, `openssl`, `curl`, `jq`, `node` |
+**Context isolation:** use only this repository's files (`guides/`, `scripts/`,
+`templates/`). If something is missing, ask the user. Don't search elsewhere.
 
-`PREFLIGHT OK` is the green light for step 3. It does **not** check Passport
-Cloud (login, team, registry-key validity) — step 1 and step 4's `docker login`
-cover those.
+**Discover before asking.** Run step 1's discovery first. Infer routine
+choices (profile, region, subnet, name, client IP) from what exists, and *state*
+them. Ask only for what you genuinely can't determine, and ask it all in one go.
+
+**AWS changes need explicit approval, and the approval names every resource.**
+Before any create or delete, show an **approval block**:
+- a table with one row per resource: action (CREATE or DELETE), type, exact
+  name, ID (or "assigned on create"), account, region and cost note;
+- the complete commands that will run.
+
+Ask once per block. Then:
+
+- **A "yes", "go ahead" or "do it" approves exactly that block.** Don't ask again,
+  and don't reply with "I'll proceed". **Run it, verify it, and report the
+  results** in the same turn.
+- **Record every created ID immediately.** Run `st` right after each create
+  command, before the next command runs.
+- **Never create anything outside the approved table.**
+- **Never delete anything unconfirmed.** It must be in `state.env` or
+  `resources.env`, **and** be confirmed by
+  `bash "$REPO/scripts/aws-resources.sh" delete /tmp/pp-aws/state.env`. That
+  script prints `STOP` if a recorded ID isn't tagged as ours. If it does, delete
+  nothing and ask.
+- **Passport Cloud API calls are yours to run, without asking.** This covers
+  registering the proxy and creating or deleting the namespace, resource group,
+  secret reference, endpoint and grant. The same goes for every `passport` CLI
+  command that needs no `sudo`, browser approval or secret value (`setup`,
+  `whoami`, `daemon status`, `ca status`, `request`).
+  - **Don't** ask permission for them.
+  - **Don't** ask the user to run them.
+  - **Do** run them, record the IDs with `st`, and say what you created.
+  - **One guard stays:** if the team already has a proxy, register yours with
+    `isDefault:false`, and tell the user why.
+  - **AWS changes still need the approval blocks above.**
+
+**Commands that need the human.** You can't type into the user's terminal, and
+they can't type into yours. Anything that needs a password, `sudo`, a browser
+approval or a secret value is a **[you]** step:
+- give the exact commands in a code block, to run **in their own terminal**;
+- say what they should see;
+- wait for "done", then verify yourself.
+
+Never ask for a secret's value in chat.
+
+**Never print secrets.** That means the registry key, private keys, the Vault
+token, login tokens and API credentials. Public keys, IDs and sha256 hashes are
+fine. Never print an API response that could contain a secret.
+
+**Don't call setup complete early.** Success is the checklist in step 8.5. If the
+explicit `curl` works but `setup` exited 2, the daemon isn't running, or the CA
+isn't trusted, say exactly that: *"requests work with explicit flags; the
+CLI/daemon setup is not complete: …"*.
+
+**Mandatory ending:** after step 8.5 passes, do the step 9 walkthrough, then
+offer step 10 (their own API) and step 11 (protection demos), one at a time.
+Never run cleanup (step 12) until the user explicitly asks for it.
+
+**MDM-managed Mac:** switch to `guides/reference/aws-mdm-macs.md` as soon as any
+of these appears:
+- CLI output says `(from macOS managed plist)`;
+- `setup` fails with `403 … teamId "org_…" is not authorized for this deployment`
+  while the proxy logs nothing;
+- `passport whoami` says `Managed Passport credentials could not be verified`.
 
 ---
 
-## 1. Install and log in to the Passport CLI
+## 1. Discover (read-only, no questions yet)
 
-Do this **before** getting a registry credential — the registry settings page
-needs a team to exist first, and this step is how you find out whether yours
-does.
+```bash
+mkdir -p /tmp/pp-aws; REPO=<repo>; . "$REPO/scripts/env.sh"
+echo "--- tools"; for t in aws session-manager-plugin passport docker node jq openssl; do printf '%-24s %s\n' "$t" "$(command -v $t >/dev/null && ($t --version 2>/dev/null | head -1) || echo MISSING)"; done
+echo "--- aws profiles"; for p in $(aws configure list-profiles 2>/dev/null); do printf '%-20s region=%-12s %s\n' "$p" "$(aws configure get region --profile $p)" "$(aws sts get-caller-identity --profile $p --query Arn --output text 2>&1 | tail -1 | cut -c1-90)"; done
+echo "--- passport"; passport --version 2>/dev/null; passport auth status 2>&1 | grep -E 'org|expires|not logged'
+echo "--- manifest"; cat /tmp/pp-aws/state.env 2>/dev/null
+```
 
-> Already have the CLI? Check with `passport --version` and skip the install
-> below if it prints a version **≥ 0.6.0** (older builds lack `setup`).
+From this output, decide without asking where you can:
+- **Profile:** the profile with a working session. If more than one works, ask which.
+- **Region:** that profile's configured region.
+- **Existing deployment:** if `/tmp/pp-aws/state.env` has a `NAME`, run
+  `bash "$REPO/scripts/aws-resources.sh" show /tmp/pp-aws/state.env` and resume
+  from there instead of creating a new one.
 
-**macOS:**
+Then go through 1.1–1.4 and do only what's missing.
+
+### 1.1 Passport CLI ([you] for the install and the browser approval)
+
+You need **version 0.6.0 or later**.
+
+**macOS** (needs `sudo`, so it runs in the user's terminal):
 
 ```bash
 curl -fL -o ~/Downloads/passport.pkg "https://dl-passport.pstmn.io/download/version/0.6.0-canary-260921-212749/osx_$([ "$(uname -m)" = arm64 ] && echo arm64 || echo 64)?channel=canary"
 sudo installer -pkg ~/Downloads/passport.pkg -target /
 ```
 
-**Windows (PowerShell):**
+**Windows (PowerShell, as administrator):**
 
 ```powershell
 curl.exe -fL -o $env:USERPROFILE\Downloads\passport.msi "https://dl-passport.pstmn.io/download/version/0.6.0-canary-260921-212749/win_64?channel=canary"
 msiexec /i $env:USERPROFILE\Downloads\passport.msi /quiet
 ```
 
-> If either URL 404s, the pinned build has rotated off the server — grab the
-> current download link from the **Set up Passport** guide in your Passport
-> Cloud team (account menu → How-to → Set up Passport) instead.
+If either URL returns 404, the pinned build has rotated off the server. Get the
+current link from the **Set up Passport** guide in your Passport team (account
+menu → How-to).
 
-Then log in:
+**Log in:**
+- **Run it:** the agent runs `passport login` and shows the printed URL and
+  confirmation code on their own line, as a full `https://` link. The user
+  approves it in their browser.
+- **No team:** if login says `authenticated login session has no organization`,
+  the user must create a team at <https://app.usepassport.ai/dashboard>, then
+  run `passport login` again. Retrying login won't offer to create one.
+- **Team ID:** the `org_…` value on the `org` line of `passport auth status`.
+
+### 1.2 AWS CLI v2 and the Session Manager plugin ([you], needs `sudo`)
+
+The plugin is required. Step 5 opens an interactive session on the instance,
+and that session is the only way the registry key reaches the instance.
+
+**macOS:**
 
 ```bash
-passport login
+# AWS CLI v2 (official installer). Skip if `aws --version` already shows aws-cli/2.x
+curl -fsSL "https://awscli.amazonaws.com/AWSCLIV2.pkg" -o /tmp/AWSCLIV2.pkg && sudo installer -pkg /tmp/AWSCLIV2.pkg -target /
+# Session Manager plugin (official package)
+ARCH=$([ "$(uname -m)" = arm64 ] && echo mac_arm64 || echo mac)
+curl -fsSL "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/$ARCH/session-manager-plugin.pkg" -o /tmp/session-manager-plugin.pkg
+sudo installer -pkg /tmp/session-manager-plugin.pkg -target /
+sudo ln -sf /usr/local/sessionmanagerplugin/bin/session-manager-plugin /usr/local/bin/session-manager-plugin
+session-manager-plugin --version
 ```
 
-This opens a browser to authenticate. Don't run `passport setup` yet — we point
-it at *your* proxy in step 7, not the production one.
+**Windows:** install `https://awscli.amazonaws.com/AWSCLIV2.msi` and
+`https://s3.amazonaws.com/session-manager-downloads/plugin/latest/windows/SessionManagerPluginSetup.exe`.
 
-> **On an MDM-managed Mac**, `passport login` will immediately auto-run `setup`
-> against your org's *managed* production endpoints, ignoring any
-> `--management-url`/`--proxy-url` — with no flag to override. If you see
-> `setup` log endpoints you didn't ask for, that's this. Switch to the **MDM guide**
-> (`guides/reference/aws-mdm-macs.md`) instead of continuing linearly.
+**Linux and other details:** see the official AWS documentation pages
+"Installing or updating the latest version of the AWS CLI" and "Install the
+Session Manager plugin for the AWS CLI".
 
-### 1.1 Confirm you have a team
+### 1.3 AWS sign-in (prefer browser-based, short-lived credentials)
 
-If `login` fails with something like `authenticated login session has no
-organization`, your account isn't part of any Passport **team** yet — and
-nothing past this point works without one (no registry access, no team ID,
-no namespace, no grants). Retrying `passport login` does **not** show a
-team-creation screen — don't chase it.
+Use the first option that applies. The user runs it in **their** terminal, and
+each option opens a browser:
 
-The fix: go to **[https://app.usepassport.ai/dashboard](https://app.usepassport.ai/dashboard)**
-and create a team there directly (or sign up and choose "I'm setting up a
-team"). Once the team exists, re-run `passport login`.
+1. **IAM Identity Center (SSO)**, if the organisation has it:
+   ```bash
+   aws configure sso --profile passport        # once: SSO start URL, region, account, role
+   aws sso login --profile passport            # whenever the session expires
+   ```
+2. **Console sign-in (AWS CLI 2.32 and later):** `aws login --profile passport`
+   reuses your AWS console login. *Unverified here:* the CLI tested was 2.31.
+3. **Long-lived access keys:** a last resort, and only for an IAM user, never
+   root. Run `aws configure --profile passport` in the user's terminal. Never
+   paste keys into chat.
 
-**Team ID = org ID.** The team ID is the `org_...` value; `passport auth status`
-prints it on the `org` line:
+Check it with `aws sts get-caller-identity --profile passport`.
+
+### 1.4 Permissions
+
+`templates/operator-iam-policy.json` is the complete policy for the identity
+that runs this guide:
+- **What it allows:** every action the commands below use, nothing else.
+- **Deletes:** only on resources tagged `project=passport`.
+- **IAM actions:** only on roles and instance profiles named `passport-proxy-*`.
+
+An administrator attaches it to the permission set, role or user. For a sandbox
+account, `PowerUserAccess` plus the policy's IAM statements also works.
+
+If an action is still denied, the guide stops and names the action. Fix the
+policy file in this repo, not just the account.
+
+---
+
+## 2. Preflight (read-only) and the plan
 
 ```bash
-passport auth status | awk '$1=="org"{print $2}'     # → ORG (MDM: see the MDM guide, A.3)
+REPO=<repo>; export AWS_PROFILE=<profile> AWS_REGION=<region>; . "$REPO/scripts/env.sh"
+bash "$REPO/scripts/preflight.sh" | tee /tmp/pp-aws/preflight.txt
+```
+
+It checks:
+- the local tools and the Session Manager plugin;
+- the AWS session;
+- a public subnet and the AMI;
+- a `RunInstances` dry run;
+- CloudFront access;
+- simulated permissions.
+
+It also picks a **collision-free name**, printed as `PREFLIGHT_NAME=<name>`.
+Every resource will be called `passport-proxy-<name>`.
+
+Fix every ❌ before going on. Then record the inputs:
+
+```bash
+REPO=<repo>; export AWS_PROFILE=<profile> AWS_REGION=<region>; . "$REPO/scripts/env.sh"
+st AWS_PROFILE "$AWS_PROFILE"; st AWS_REGION "$AWS_REGION"
+st NAME "$(sed -n 's/^PREFLIGHT_NAME=//p' /tmp/pp-aws/preflight.txt)"
+st ACCOUNT "$(aws sts get-caller-identity --query Account --output text)"
+st ORG "$(passport auth status | awk '$1=="org"{print $2}')"          # MDM Mac: read it from the container CLI (MDM guide A.3)
+st CLIENT_CIDR "$(curl -s https://checkip.amazonaws.com | tr -d '[:space:]')/32"
+st VPC "$(aws ec2 describe-vpcs --filters Name=is-default,Values=true --query 'Vpcs[0].VpcId' --output text)"
+st SUBNET "$(sed -n 's/.*public subnet \(subnet-[0-9a-f]*\).*/\1/p' /tmp/pp-aws/preflight.txt)"
+st AMI "$(aws ssm get-parameter --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 --query Parameter.Value --output text)"
+st CF_PL "$(aws ec2 describe-managed-prefix-lists --filters Name=prefix-list-name,Values=com.amazonaws.global.cloudfront.origin-facing --query 'PrefixLists[0].PrefixListId' --output text)"
+cat /tmp/pp-aws/state.env
 ```
 
 ---
 
-## 2. Get a registry credential
+## 3. Approval block A: create the AWS resources
 
-The Proxy image is served from `ociregistry.usepassport.ai`, gated by a
-credential scoped to it. Your EC2 instance will need it to pull the image.
+Show the user this table with real values, plus the full command block below,
+and ask once. Nothing exists until they say yes.
 
-- If you already have a `PASSPORT_REGISTRY_KEY`, skip ahead.
-- Otherwise, create one at **[https://app.usepassport.ai/org/registry](https://app.usepassport.ai/org/registry)**
-  (Org Settings → Registry) — this needs admin access on your team.
-- No admin access and no credential? **Stop and ask your team admin.** There is
-  no other way to pull the Proxy image — don't try to work around this step.
+| Action | Type | Name | ID | Notes |
+|---|---|---|---|---|
+| CREATE | Security group | `passport-proxy-<NAME>` | assigned on create | In `<VPC>`. Inbound **8443 from `<CLIENT_CIDR>` only**; **8081 from CloudFront (`<CF_PL>`) only** |
+| CREATE | Elastic IP | `passport-proxy-<NAME>` | assigned on create | About $3.60/month |
+| CREATE | IAM role | `passport-proxy-<NAME>` | n/a | Lets the instance run the SSM agent. **No access to any secret** |
+| CREATE | IAM instance profile | `passport-proxy-<NAME>` | n/a | Wraps the role |
+| CREATE | CloudFront function | `passport-proxy-<NAME>-404` | n/a | Returns 404 for everything except `/ca.pem` and `/issue-cert` |
+| CREATE | CloudFront distribution | "Passport proxy `<NAME>` management" | assigned on create | HTTPS front door for port 8081, `PriceClass_100` |
+| CREATE | EC2 instance (+ its root volume) | `passport-proxy-<NAME>` | assigned on create | `t3.small`, `<AMI>` (Amazon Linux 2023), `<SUBNET>`, 20 GB encrypted gp3, IMDSv2 only. About $15/month |
 
-Save it to a file (never into chat or user-data):
-
-```bash
-printf '%s' '<your credential>' > /tmp/pp-aws/registry-key && chmod 600 /tmp/pp-aws/registry-key
-```
-
----
-
-## 3. AWS network and identity (one confirmation, then run)
-
-Show this whole block with real values, get one yes, then run it. Write each
-id into `state.env` as you go (it's also your cleanup manifest).
-
-Inputs (choose, or use the defaults and say so):
-
-| Input | Default |
-|---|---|
-| Region | the profile's default |
-| VPC / subnet | the **default VPC** and one of its **public** subnets (`MapPublicIpOnLaunch=true`, route `0.0.0.0/0 → igw-…`) |
-| Client CIDR | your current public IP `/32` — `curl -s https://checkip.amazonaws.com` (MDM guide (`guides/reference/aws-mdm-macs.md`): the container egresses from the same IP) |
-| Instance type | `t3.small` (x86_64) — `t3.micro` is too tight for two containers |
-| SSH | none (use SSM) |
+Everything is in account `<ACCOUNT>`, region `<AWS_REGION>`, tagged
+`project=passport`. Nothing else is created.
 
 ```bash
-cd /tmp/pp-aws; : > state.env
-st() { echo "$1=$2" >> state.env; }                 # record a created resource
-ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-MYIP=$(curl -s https://checkip.amazonaws.com); CLIENT_CIDR="$MYIP/32"
+REPO=<repo>; . "$REPO/scripts/env.sh"; set -e; cd /tmp/pp-aws
+N=passport-proxy-$NAME; TAGS="{Key=Name,Value=$N},{Key=project,Value=passport}"
 
-VPC=$(aws ec2 describe-vpcs --filters Name=is-default,Values=true --query 'Vpcs[0].VpcId' --output text)
-SUBNET=""          # first auto-public-IP subnet whose 0.0.0.0/0 route goes to an internet gateway (same rule as preflight)
-for S in $(aws ec2 describe-subnets --filters Name=vpc-id,Values=$VPC Name=map-public-ip-on-launch,Values=true --query 'Subnets[].SubnetId' --output text); do
-  GW=$(aws ec2 describe-route-tables --filters Name=association.subnet-id,Values=$S --query 'RouteTables[0].Routes[?DestinationCidrBlock==`0.0.0.0/0`].GatewayId' --output text)
-  { [ -z "$GW" ] || [ "$GW" = None ]; } && GW=$(aws ec2 describe-route-tables --filters Name=vpc-id,Values=$VPC Name=association.main,Values=true \
-    --query 'RouteTables[0].Routes[?DestinationCidrBlock==`0.0.0.0/0`].GatewayId' --output text)
-  case "$GW" in igw-*) SUBNET=$S; break;; esac
-done
-[ -n "$SUBNET" ] || echo "NO PUBLIC SUBNET — stop and pick one (see preflight)"
-AMI=$(aws ssm get-parameter --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 \
-  --query Parameter.Value --output text)
-echo "vpc=$VPC subnet=$SUBNET ami=$AMI client=$CLIENT_CIDR"
-st NAME $NAME; st AWS_PROFILE $AWS_PROFILE; st AWS_REGION $AWS_REGION; st VPC $VPC; st SUBNET $SUBNET
-
-# 3a security group: data plane 8443 ONLY from your CIDR; management 8081 ONLY from CloudFront's origin-facing prefix list
-CF_PL=$(aws ec2 describe-managed-prefix-lists --filters Name=prefix-list-name,Values=com.amazonaws.global.cloudfront.origin-facing \
-  --query 'PrefixLists[0].PrefixListId' --output text); st CF_PL $CF_PL
-SG=$(aws ec2 create-security-group --group-name passport-proxy-$NAME --description "Passport proxy $NAME" --vpc-id $VPC \
-  --tag-specifications "ResourceType=security-group,Tags=[{Key=Name,Value=passport-proxy-$NAME},{Key=project,Value=passport}]" \
-  --query GroupId --output text); st SG $SG
+# A1 security group
+st SG "$(aws ec2 create-security-group --group-name $N --description "Passport proxy $NAME" --vpc-id $VPC \
+  --tag-specifications "ResourceType=security-group,Tags=[$TAGS]" --query GroupId --output text)"
 aws ec2 authorize-security-group-ingress --group-id $SG --ip-permissions \
   "IpProtocol=tcp,FromPort=8443,ToPort=8443,IpRanges=[{CidrIp=$CLIENT_CIDR,Description=passport-data-plane}]" \
-  "IpProtocol=tcp,FromPort=8081,ToPort=8081,PrefixListIds=[{PrefixListId=$CF_PL,Description=passport-mgmt-via-cloudfront}]"
+  "IpProtocol=tcp,FromPort=8081,ToPort=8081,PrefixListIds=[{PrefixListId=$CF_PL,Description=passport-mgmt-via-cloudfront}]" >/dev/null
 
-# 3b Elastic IP first: its hostname goes into the proxy's certificate SANs
-read ALLOC EIP < <(aws ec2 allocate-address --domain vpc --query '[AllocationId,PublicIp]' --output text \
-  --tag-specifications "ResourceType=elastic-ip,Tags=[{Key=Name,Value=passport-proxy-$NAME},{Key=project,Value=passport}]")
-st ALLOC $ALLOC; st EIP $EIP
-if [ "$AWS_REGION" = us-east-1 ]; then PROXY_HOST=ec2-${EIP//./-}.compute-1.amazonaws.com
-else PROXY_HOST=ec2-${EIP//./-}.$AWS_REGION.compute.amazonaws.com; fi
-st PROXY_HOST $PROXY_HOST
-```
+# A2 Elastic IP (its DNS name goes into the proxy cert and the CloudFront origin)
+read -r A E < <(aws ec2 allocate-address --domain vpc --tag-specifications "ResourceType=elastic-ip,Tags=[$TAGS]" \
+  --query '[AllocationId,PublicIp]' --output text); st ALLOC "$A"; st EIP "$E"
+if [ "$AWS_REGION" = us-east-1 ]; then st PROXY_HOST "ec2-${EIP//./-}.compute-1.amazonaws.com"
+else st PROXY_HOST "ec2-${EIP//./-}.$AWS_REGION.compute.amazonaws.com"; fi
 
-> **Never open 8081 to `0.0.0.0/0`.** It's the management plane (`/ca.pem`,
-> `/issue-cert`). The proxy serves it as plain HTTP, and the CLI only accepts an
-> **HTTPS** management URL for a non-localhost host. So CloudFront (3.4) gives
-> you a trusted `https://<id>.cloudfront.net` front door with no domain of your
-> own, and the security group lets **only CloudFront** reach 8081. The
-> CloudFront → EC2 hop is still plain HTTP; for production use your own domain
-> with TLS on the origin.
-
-### 3.1 Generate the proxy's keys (on your machine)
-
-- A CA/signing private key (the proxy derives its own self-signed CA cert from it).
-- A reference keypair (encrypts secret references end to end; the public half
-  is registered with Passport Cloud in step 6).
-
-```bash
-cd /tmp/pp-aws
-# Only generate if missing — regenerating ref.pem breaks existing secret references (see step 6's second gotcha).
-[ -f ca.pem ]  || openssl genrsa -out ca.pem 2048
-[ -f ref.pem ] || openssl genrsa -out ref.pem 2048
-openssl rsa -in ref.pem -pubout -out reference-public-key.pem
-```
-
-### 3.2 Put the keys and registry key in Secrets Manager
-
-The instance fetches them at boot, so **no secret is ever in user-data** (user-data
-is readable from the instance metadata service and the EC2 API).
-
-```bash
-cd /tmp/pp-aws
-for pair in ca-key:ca.pem reference-key:ref.pem registry-key:registry-key; do
-  aws secretsmanager create-secret --name passport/$NAME/${pair%%:*} --secret-string "file://${pair##*:}" \
-    --tags Key=project,Value=passport --query Name --output text
-done
-st SECRET_PREFIX passport/$NAME
-```
-
-> **`a secret with this name is already scheduled for deletion`:** an earlier
-> deployment with the same NAME was cleaned up with a recovery window. Pick a
-> different NAME (simplest), or `aws secretsmanager restore-secret` and
-> `put-secret-value` your new key. Don't reuse a half-created name: roll back
-> what you created (it's all in `state.env`) before restarting under a new one.
-
-### 3.3 Instance role (least privilege) and profile
-
-The role can read **only** the three secrets above, and run the SSM agent
-(needed for Run Command). The SSM permissions are an **inline policy** rather
-than the managed `AmazonSSMManagedInstanceCore`, because many IAM users may
-create inline policies but are denied `iam:AttachRolePolicy`.
-
-```bash
-aws iam create-role --role-name passport-proxy-$NAME --tags Key=project,Value=passport --assume-role-policy-document \
+# A3 instance role (SSM agent only) + instance profile
+aws iam create-role --role-name $N --tags Key=project,Value=passport --assume-role-policy-document \
   '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ec2.amazonaws.com"},"Action":"sts:AssumeRole"}]}' >/dev/null
-st ROLE passport-proxy-$NAME
-aws iam put-role-policy --role-name passport-proxy-$NAME --policy-name passport-proxy-secrets --policy-document \
-  '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"secretsmanager:GetSecretValue","Resource":"arn:aws:secretsmanager:'$AWS_REGION':'$ACCOUNT':secret:passport/'$NAME'/*"}]}'
-aws iam put-role-policy --role-name passport-proxy-$NAME --policy-name passport-proxy-ssm --policy-document \
+st ROLE $N
+aws iam put-role-policy --role-name $N --policy-name passport-proxy-ssm --policy-document \
   '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["ssm:UpdateInstanceInformation","ssm:ListInstanceAssociations","ssm:ListAssociations","ssm:GetDocument","ssm:DescribeDocument","ssm:GetParameters","ssm:PutComplianceItems","ssm:UpdateAssociationStatus","ssm:UpdateInstanceAssociationStatus","ssmmessages:CreateControlChannel","ssmmessages:CreateDataChannel","ssmmessages:OpenControlChannel","ssmmessages:OpenDataChannel","ec2messages:AcknowledgeMessage","ec2messages:DeleteMessage","ec2messages:FailMessage","ec2messages:GetEndpoint","ec2messages:GetMessages","ec2messages:SendReply"],"Resource":"*"}]}'
-aws iam create-instance-profile --instance-profile-name passport-proxy-$NAME >/dev/null
-aws iam add-role-to-instance-profile --instance-profile-name passport-proxy-$NAME --role-name passport-proxy-$NAME
-st PROFILE passport-proxy-$NAME
-sleep 12      # IAM propagation; if run-instances later says the profile is invalid, wait and retry
-```
+aws iam create-instance-profile --instance-profile-name $N >/dev/null; st PROFILE $N
+aws iam add-role-to-instance-profile --instance-profile-name $N --role-name $N
 
-### 3.4 CloudFront in front of the management port (HTTPS)
+# A4 CloudFront function + distribution (its ~3-minute deploy overlaps the boot)
+ETAG=$(aws cloudfront create-function --name $N-404 --function-config Comment=passport-404,Runtime=cloudfront-js-2.0 \
+  --function-code "fileb://$REPO/templates/cloudfront-404.js" --query ETag --output text); st CF_FUNCTION $N-404
+FN=$(aws cloudfront publish-function --name $N-404 --if-match $ETAG --query 'FunctionSummary.FunctionMetadata.FunctionARN' --output text)
+sed -e "s|__CALLER_REF__|$N-$(date +%s)|" -e "s|__NAME__|$NAME|" -e "s|__HOSTNAME__|$PROXY_HOST|" -e "s|__FN_ARN__|$FN|" \
+  "$REPO/templates/cloudfront-dist.json.tmpl" > cf-dist.json
+read -r D DOM < <(aws cloudfront create-distribution --distribution-config file://cf-dist.json --query 'Distribution.[Id,DomainName]' --output text)
+st CF_DIST "$D"; st CF_DOMAIN "$DOM"
 
-CloudFront exposes **only** `/ca.pem` and `/issue-cert`; every other path
-(`/metrics`, `/readyz`, …) returns 404 from a viewer-request function. It can
-be created before the instance exists (the origin is the EIP's DNS name).
-Its ~3-minute deploy overlaps the instance boot.
-
-```bash
-cd /tmp/pp-aws
-cp "$REPO/templates/cloudfront-404.js" .
-cp "$REPO/templates/cloudfront-dist.json.tmpl" .
-ETAG=$(aws cloudfront create-function --name passport-proxy-$NAME-404 --function-config Comment=passport-404,Runtime=cloudfront-js-2.0 \
-  --function-code fileb://cloudfront-404.js --query ETag --output text); st CF_FUNCTION passport-proxy-$NAME-404
-FN=$(aws cloudfront publish-function --name passport-proxy-$NAME-404 --if-match $ETAG --query 'FunctionSummary.FunctionMetadata.FunctionARN' --output text)
-sed -e "s|__CALLER_REF__|passport-proxy-$NAME-$(date +%s)|" -e "s|__NAME__|$NAME|" -e "s|__HOSTNAME__|$PROXY_HOST|" -e "s|__FN_ARN__|$FN|" \
-  cloudfront-dist.json.tmpl > cf-dist.json
-read DIST CFDOMAIN < <(aws cloudfront create-distribution --distribution-config file://cf-dist.json --query 'Distribution.[Id,DomainName]' --output text)
-st CF_DIST $DIST; st CF_DOMAIN $CFDOMAIN
-aws cloudfront wait distribution-deployed --id $DIST          # ~3 min; fine to run after step 4.2 instead
-```
-
-> Verified 2026-10-06: `/ca.pem` → 200 (`CN=passport-proxy`), `/metrics` and
-> `/readyz` → 404, empty `POST /issue-cert` → `csr is required`, and
-> `passport setup --management-url https://$CF_DOMAIN` plus the 8.1 `curl`
-> returned the expected sha256 with security group 8081 open only to CloudFront.
-
----
-
-## 4. Render user-data and launch the instance
-
-User-data does everything the AMI would have pre-baked: installs Docker, pulls
-the images, starts Vault and the Proxy. It contains **no secrets** — only the
-team ID, hostnames and secret *names*.
-
-### 4.1 Render user-data
-
-```bash
-cd /tmp/pp-aws
-ORG="<org_... from step 1.1>"
-cp "$REPO/templates/user-data.tmpl" user-data.tmpl
-sed -e "s|__REGION__|$AWS_REGION|" -e "s|__PREFIX__|passport/$NAME|" -e "s|__ORG__|$ORG|" -e "s|__SANS__|$PROXY_HOST,$EIP,localhost|" \
-  user-data.tmpl > user-data.sh
-grep -nE 'sk_|PRIVATE KEY' user-data.sh && echo "SECRET IN USER-DATA — STOP" || echo "user-data has no secrets"
-```
-
-> Symptom if the key files aren't world-readable: the proxy container restarts
-> forever with `PASSPORT_PROXY_PRIVATE_KEY_PATH: open /opt/passport/ca.pem: permission denied`.
->
-> `PASSPORT_PROXY_DATAPLANE_CERT_SANS` lists the names clients use for `:8443`.
-> The CLI connects to `$EIP`/`$PROXY_HOST`, so both must be there (`localhost` is kept
-> for the in-instance test traffic).
->
-> `ca-bundle.crt` is the Amazon Linux 2023 path (verified). Appending the system
-> bundle to the echo cert means the proxy trusts both the public CAs and the
-> echo server, whether `SSL_CERT_FILE` adds to or replaces its roots.
-
-### 4.2 Launch
-
-```bash
-I=$(aws ec2 run-instances --image-id $AMI --instance-type t3.small --subnet-id $SUBNET --security-group-ids $SG \
-  --iam-instance-profile Name=passport-proxy-$NAME --associate-public-ip-address \
+# A5 instance. User-data holds NO secrets, only the team ID and hostnames (checked below).
+sed -e "s|__ORG__|$ORG|" -e "s|__SANS__|$PROXY_HOST,$EIP,localhost|" "$REPO/templates/user-data.tmpl" > user-data.sh
+! grep -qE 'sk_|PRIVATE KEY|VAULT_TOKEN=[0-9a-f]' user-data.sh || { echo "SECRET IN USER-DATA — STOP"; exit 1; }
+sleep 10    # IAM instance-profile propagation
+st INSTANCE "$(aws ec2 run-instances --image-id $AMI --instance-type t3.small --subnet-id $SUBNET --security-group-ids $SG \
+  --iam-instance-profile Name=$N --associate-public-ip-address \
   --metadata-options HttpTokens=required,HttpEndpoint=enabled,HttpPutResponseHopLimit=2 \
   --block-device-mappings 'DeviceName=/dev/xvda,Ebs={VolumeSize=20,VolumeType=gp3,Encrypted=true}' \
-  --user-data file://user-data.sh \
-  --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=passport-proxy-$NAME},{Key=project,Value=passport}]" \
-  --query 'Instances[0].InstanceId' --output text); st INSTANCE $I
-aws ec2 wait instance-running --instance-ids $I
-aws ec2 associate-address --instance-id $I --allocation-id $ALLOC >/dev/null
+  --user-data file://user-data.sh --tag-specifications "ResourceType=instance,Tags=[$TAGS]" "ResourceType=volume,Tags=[$TAGS]" \
+  --query 'Instances[0].InstanceId' --output text)"
+aws ec2 wait instance-running --instance-ids $INSTANCE
+aws ec2 associate-address --instance-id $INSTANCE --allocation-id $ALLOC >/dev/null
+bash "$REPO/scripts/aws-resources.sh" show /tmp/pp-aws/state.env
 ```
 
-> `HttpPutResponseHopLimit=2` is deliberate: containers are one network hop
-> behind the host, and the AWS CLI inside user-data runs on the host, so 1 would
-> also work — but 2 lets you run `aws` inside a container if you ever need to.
-> IMDSv2 stays required.
+**If a command fails halfway:**
+- **What happens:** `set -e` stops the block, and everything created so far is
+  already recorded in `state.env`.
+- **What to tell the user:** show `aws-resources.sh show` and explain the error.
+- **IAM propagation** (`… instance profile is invalid`): wait about 15 s and
+  re-run only A5.
+- **Anything else:** roll back what was created (step 12, with approval), then retry.
+
+Never re-run the whole block, because that creates duplicates.
 
 ---
 
-## 5. Verify the instance (read-only)
+## 4. Wait for the instance (read-only)
 
-Boot takes ~2–4 minutes (package install + image pulls).
-
-CloudFront only forwards `/ca.pem` and `/issue-cert`, so poll `/ca.pem` over HTTPS:
+First boot installs Docker and starts Vault, which takes about 2 minutes. The
+proxy isn't running yet, because it needs your registry login (step 5).
 
 ```bash
-source /tmp/pp-aws/state.env; export AWS_PROFILE AWS_REGION
+REPO=<repo>; . "$REPO/scripts/env.sh"
 for i in $(seq 1 30); do
-  c=$(curl -s -m 8 -o /tmp/pp-aws/proxy-ca.pem -w '%{http_code}' https://$CF_DOMAIN/ca.pem); [ "$c" = 200 ] && break; sleep 10
-done
-echo "ca.pem=$c"
-for p in /metrics /readyz; do echo "$p -> $(curl -s -m 8 -o /dev/null -w '%{http_code}' https://$CF_DOMAIN$p) (must be 404)"; done
-curl -s -m 8 -X POST -H 'content-type: application/json' -d '{}' https://$CF_DOMAIN/issue-cert   # expect: csr is required
-```
-
-If it never reaches 200, read the boot log without SSH:
-
-```bash
-aws ec2 get-console-output --instance-id $INSTANCE --latest --query Output --output text | tail -40
-# or, once SSM shows the instance as Online (the `onhost` helper from step 6.2):
-#   onhost 'tail -60 /var/log/passport-bootstrap.log; docker ps -a; docker logs pp-proxy-local 2>&1 | tail -30'
-```
-
-Management/data-plane sanity (read-only; no cert needed):
-
-```bash
-openssl x509 -in /tmp/pp-aws/proxy-ca.pem -noout -subject
-curl -s -m 10 -o /dev/null -D - --proxy https://$PROXY_HOST:8443 --proxy-insecure https://example.com/ | head -3   # expect 407 (client cert required)
-```
-
----
-
-## 6. Register the proxy and create a Namespace in Passport Cloud
-
-You can do this in the web UI or through the API. The API path is below; the
-UI path is:
-
-- **Team Settings → Access Proxies → Create Access Proxy** with
-  Proxy URL `https://<PROXY_HOST>:8443` (the `ec2-…` name, or the EIP), Management
-  Host `https://<CF_DOMAIN>` (the CloudFront domain from 3.4), and Proxy public key = contents of
-  `/tmp/pp-aws/reference-public-key.pem`.
-- **Home → Create Namespace → Add Resources → Manual**: Method `GET`, Host
-  `localhost` **(no port)**, Path `/echo`, Secret labelled `x-key`, vault type
-  **HashiCorp**, vault key `test-key`.
-- Grant yourself access to that endpoint.
-
-> **Gotcha:** the proxy strips the port off the *request's* target host before
-> matching, but does **not** strip the port off the endpoint's stored `host`.
-> Register `host` as `localhost`, with no port — even though the request goes
-> to `https://localhost:9443/echo`. Registering `localhost:9443` silently fails
-> every request with `not authorized for vault refs`.
->
-> **Second gotcha:** a secret reference's vault config is encrypted server-side
-> under the public key of whichever proxy registration was active when you
-> created it. If you re-register the proxy with a *new* keypair, old references
-> become undecryptable (`failed to decrypt vault reference: <uuid>`). Create a
-> fresh namespace/reference/endpoint/grant under the currently registered proxy.
-
-### 6.1 Via the API (no web UI)
-
-The web app is a front end for `https://api.usepassport.ai`; the CLI login
-session's token authenticates the same calls. The token is read from
-`passportrc` and never printed. `PASSPORT_DIR` is the CLI's credentials folder:
-`~/.passport` normally, `~/passport-cli-dl/.passport` on the MDM path.
-
-```bash
-cp "$REPO/scripts/passport-api.js" /tmp/pp-aws/passport-api.js
-```
-
-```bash
-source /tmp/pp-aws/state.env; cd /tmp/pp-aws
-export PASSPORT_DIR=~/.passport            # MDM: ~/passport-cli-dl/.passport
-api() { node /tmp/pp-aws/passport-api.js "$@"; }
-
-api GET /api/v2/tenant/config | jq -c '.body.data[]|{proxyId,proxyEndpoint,isDefault}'   # existing registrations
-```
-
-> **Production care:** `isDefault:true` changes which proxy every developer's
-> `passport setup` discovers and which key encrypts new references. If the team
-> already has a proxy, tell the user and use `isDefault:false`. A registration
-> with the same endpoint but a different `publicKey` is *stale* — don't reuse
-> it; register a fresh one and leave the old one unless the user says to delete it.
-
-```bash
-# 6.1a register the proxy, then confirm the stored key matches your local one
-jq -n --rawfile k reference-public-key.pem --arg n "passport-proxy-$NAME" --arg e "https://$PROXY_HOST:8443" --arg m "https://$CF_DOMAIN" \
-  '{encryptionMode:"B",publicKey:$k,proxyName:$n,proxyEndpoint:$e,managementHostUrl:$m,isDefault:true}' > register-body.json
-api POST /api/v2/tenant/config @register-body.json | tee register-out.json | jq -c '{status,proxyId:.body.data.proxyId}'
-PROXY_ID=$(jq -r .body.data.proxyId register-out.json); st PROXY_ID $PROXY_ID
-WANT=$(openssl pkey -pubin -in reference-public-key.pem -outform DER | openssl dgst -sha256 | awk '{print $NF}')
-GOT=$(api GET /api/v2/tenant/config | jq -r --arg p "$PROXY_ID" '.body.data[]|select(.proxyId==$p).publicKey' | openssl pkey -pubin -outform DER | openssl dgst -sha256 | awk '{print $NF}')
-[ "$WANT" = "$GOT" ] && echo "key match" || echo "KEY MISMATCH"
-```
-
-The secret must exist in the instance's Vault **before** a request can resolve
-it. Seed it (step 6.2), then create the Passport objects (6.3).
-
-### 6.2 Seed the Vault on the instance (via SSM — no SSH, no open port)
-
-The Vault is not published on any host port, so reach it with SSM Run Command.
-Wait until the instance shows as online first.
-
-```bash
-source /tmp/pp-aws/state.env; export AWS_PROFILE AWS_REGION
-for i in $(seq 1 20); do
   aws ssm describe-instance-information --filters Key=InstanceIds,Values=$INSTANCE \
-    --query 'InstanceInformationList[0].PingStatus' --output text | grep -q Online && break; sleep 10
-done
-
-# run a shell snippet on the instance, print its output
-onhost() {
-  local id; id=$(aws ssm send-command --instance-ids $INSTANCE --document-name AWS-RunShellScript \
-    --parameters "$(jq -nc --arg c "$1" '{commands:[$c]}')" --query Command.CommandId --output text)
-  aws ssm wait command-executed --command-id $id --instance-id $INSTANCE 2>/dev/null
-  aws ssm get-command-invocation --command-id $id --instance-id $INSTANCE --query '[Status,StandardOutputContent,StandardErrorContent]' --output text
-}
-
-# Seed secret/test-key with a FAKE value; the token is read on the instance and never leaves it.
-onhost 'set -a; . /opt/passport/vault.env; set +a
-docker exec -e VAULT_ADDR=http://127.0.0.1:8200 -e VAULT_TOKEN=$VAULT_TOKEN pp-vault-dev vault kv put secret/test-key value="some-local-test-value" | tail -4'
+    --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null | grep -q Online && break; sleep 10; done
+onhost 'tail -2 /var/log/passport-bootstrap.log; docker ps --format "{{.Names}} {{.Status}}"'
 ```
 
-This lands at `secret/data/test-key` — the default path the proxy's HashiCorp
-backend expects (`vaultKey` is relative to the `secret/` mount: `test-key`, not
-`secret/data/test-key`). The Vault is in-memory dev mode: a **reboot of the
-Vault container loses it** — re-run this step. Use a fake value for this test;
-for anything real, run a properly initialised Vault.
+Expect `passport-bootstrap: done …` and `pp-vault-dev Up …`.
 
-### 6.3 Create the namespace, resource group, secret reference, endpoint and grant
+Then fetch the reference **public** key and record its fingerprint. It's public,
+so it's safe to pass through SSM output:
 
 ```bash
-source /tmp/pp-aws/state.env; cd /tmp/pp-aws; export PASSPORT_DIR=~/.passport    # MDM: ~/passport-cli-dl/.passport
-api() { node /tmp/pp-aws/passport-api.js "$@"; }
-PP_USER=$(node -e 'const fs=require("fs"),p=require("path");const rc=JSON.parse(fs.readFileSync(p.join(process.env.PASSPORT_DIR,"passportrc"),"utf8"));console.log(JSON.parse(Buffer.from(rc.login._profiles[0].workos.accessToken.split(".")[1],"base64url")).sub)')
-NS=$(api POST /api/v1/namespaces "$(jq -nc --arg n "passport-proxy-$NAME-e2e" '{name:$n,description:"Passport proxy e2e test"}')" | jq -r '.body.data.id')
-RG=$(api POST /api/v1/namespaces/$NS/resource-groups '{"name":"localhost","description":"Passport proxy e2e test","source":"manual"}' | jq -r '.body.data.id')
-REF=$(api POST /api/v2/secret-references "$(jq -nc --arg ns "$NS" '{namespaceId:$ns,name:"demo",vaultType:"hashicorp",vaultKey:"test-key"}')" | jq -r '.body.data.id')
-EP=$(api POST /api/v2/resource-endpoints "$(jq -nc --arg ns "$NS" --arg r "$REF" --arg g "$RG" '{namespaceId:$ns,method:"GET",host:"localhost",path:"/echo",secrets:[{label:"x-key",secretReferenceId:$r}],resourceGroupIds:[$g]}')" | jq -r '.body.data.id')
-GR=$(api POST /api/v2/access-grants "$(jq -nc --arg u "$PP_USER" --arg ns "$NS" --arg e "$EP" '{userId:$u,namespaceId:$ns,endpointIds:[$e],reason:"passport proxy aws e2e",validity:1}')" | jq -r '.body.data[0].id')
-st NS $NS; st RG $RG; st REF $REF; st EP $EP; st GR $GR; cat state.env | tail -5
+REPO=<repo>; . "$REPO/scripts/env.sh"
+onhost 'cat /opt/passport/reference-public-key.pem' > /tmp/pp-aws/reference-public-key.pem
+grep -q 'BEGIN PUBLIC KEY' /tmp/pp-aws/reference-public-key.pem && \
+  st REF_KEY_SHA256 "$(openssl pkey -pubin -in /tmp/pp-aws/reference-public-key.pem -outform DER | openssl dgst -sha256 | awk '{print $NF}')"
 ```
-
-> **The resource group is what makes it visible in the web UI.** The namespace
-> page lists *resource groups*, then the endpoints inside each one. An endpoint
-> created without `resourceGroupIds` works fine through the proxy but never
-> shows up in Passport Cloud. `source:"manual"` is what the web UI's **Manual**
-> flow uses. To fix an endpoint created earlier without a group, create the
-> group as above, then attach it (a `PUT` changes only the fields you send):
-> `api PUT /api/v2/resource-endpoints/$EP "$(jq -nc --arg g "$RG" '{resourceGroupIds:[$g]}')"`
-
-Cleanup order (step 10) is: grant → endpoint → resource group → secret reference → namespace.
 
 ---
 
-## 7. `passport setup`
+## 5. [you] Log in to the registry and start the proxy (interactive session)
+
+The registry key must never pass through the agent, user-data or SSM Run
+Command, so **the user types it into their own terminal**. Give them this block
+with the real values filled in:
 
 ```bash
-source /tmp/pp-aws/state.env
-passport setup --management-url https://$CF_DOMAIN --proxy-url https://$PROXY_HOST:8443
+aws ssm start-session --target <INSTANCE> --region <AWS_REGION> --profile <AWS_PROFILE>
+# — now on the instance —
+sudo docker login ociregistry.usepassport.ai --username passport   # paste the registry key at the Password: prompt (hidden)
+sudo passport-start-proxy                                          # pulls the image, logs out of the registry, starts proxy + echo
+exit
 ```
 
-On an MDM Mac use the MDM guide (A.4) instead — same flags.
+- **No registry key yet?** Create one at
+  <https://app.usepassport.ai/org/registry> (Org Settings → Registry; needs
+  admin), or ask the team admin.
+- **Expected output:** `pp-proxy-local Up …`, `pp-echo Up …` and `readyz=200`.
+- **The key doesn't stay on the instance:** `passport-start-proxy` runs
+  `docker logout` right after the pull.
 
-> **Why CloudFront:** the CLI rejects a plain-HTTP management URL on a public
-> address (`invalid management URL: expected an HTTPS origin (or http://localhost
-> for local dev)…`). If you skipped 3.4, the fallback is a local TCP forwarder
-> so the CLI sees `http://localhost:8081`: run
-> `node -e "require('net').createServer(c=>{const u=require('net').connect(8081,'$EIP');c.pipe(u).pipe(c);c.on('error',()=>u.destroy());u.on('error',()=>c.destroy())}).listen(8081,'127.0.0.1')" &`
-> (MDM Mac: inside `pp-cli-linux`), open 8081 to your own `/32` in the
-> security group, and pass `--management-url http://localhost:8081`.
+When the user says done, verify it yourself:
 
-Sanity-check what got embedded in your issued cert:
+```bash
+REPO=<repo>; . "$REPO/scripts/env.sh"
+onhost 'docker ps --format "{{.Names}} {{.Status}}"; curl -s -o /dev/null -w "readyz=%{http_code}\n" http://localhost:8081/readyz'
+aws cloudfront wait distribution-deployed --id $CF_DIST
+curl -s -m 10 -o /tmp/pp-aws/proxy-ca.pem -w "ca.pem via CloudFront=%{http_code}\n" https://$CF_DOMAIN/ca.pem
+openssl x509 -in /tmp/pp-aws/proxy-ca.pem -noout -subject                 # CN=passport-proxy
+for p in /metrics /readyz; do echo "$p -> $(curl -s -m 8 -o /dev/null -w '%{http_code}' https://$CF_DOMAIN$p) (must be 404)"; done
+curl -s -m 10 -o /dev/null -D - --proxy https://$PROXY_HOST:8443 --proxy-insecure https://example.com/ | head -1   # 407 = needs a client cert
+```
+
+---
+
+## 6. Passport Cloud: register the proxy and create the demo (agent runs it, no approval needed)
+
+First list what exists:
+`api GET /api/v2/tenant/config | jq -c '.body.data[]|{proxyId,proxyName,isDefault}'`.
+Then run the block below without asking. Afterwards, tell the user what was
+created, using this table with the real IDs:
+
+| Action | Object | Name / value |
+|---|---|---|
+| CREATE | Proxy registration | `passport-proxy-<NAME>`, endpoint `https://<PROXY_HOST>:8443`, management `https://<CF_DOMAIN>`, key sha256 `<REF_KEY_SHA256>`. **Made the default only if the team has no proxy yet**, because the default changes what every teammate's `passport setup` uses |
+| CREATE | Namespace | `passport-proxy-<NAME>-e2e` |
+| CREATE | Resource group | `localhost` (`source: manual`), so the endpoint shows in the web UI |
+| CREATE | Secret reference | `demo` → HashiCorp Vault key `test-key` |
+| CREATE | Resource endpoint | `GET localhost /echo`, credential slot `x-key` |
+| CREATE | Access grant | you, on that endpoint, for 1 day |
+| WRITE | Vault entry on the instance | `secret/test-key` = the **known fake** value `some-local-test-value` |
+
+```bash
+REPO=<repo>; . "$REPO/scripts/env.sh"; set -e; cd /tmp/pp-aws
+DEFAULT=$(api GET /api/v2/tenant/config | jq '(.body.data|length)==0')
+jq -n --rawfile k reference-public-key.pem --arg n "passport-proxy-$NAME" --arg e "https://$PROXY_HOST:8443" --arg m "https://$CF_DOMAIN" \
+  --argjson d "$DEFAULT" '{encryptionMode:"B",publicKey:$k,proxyName:$n,proxyEndpoint:$e,managementHostUrl:$m,isDefault:$d}' > register-body.json
+st PROXY_ID "$(api POST /api/v2/tenant/config @register-body.json | jq -r .body.data.proxyId)"
+GOT=$(api GET /api/v2/tenant/config | jq -r --arg p "$PROXY_ID" '.body.data[]|select(.proxyId==$p).publicKey' | openssl pkey -pubin -outform DER | openssl dgst -sha256 | awk '{print $NF}')
+[ "$GOT" = "$REF_KEY_SHA256" ] && echo "registered key matches the instance's key" || { echo "KEY MISMATCH"; exit 1; }
+
+# Demo credential: a deliberately FAKE, publicly known value, so passing it via Run Command is fine. Real ones: step 10.
+onhost '. /opt/passport/vault.env; docker exec -e VAULT_ADDR=http://127.0.0.1:8200 -e VAULT_TOKEN=$VAULT_TOKEN pp-vault-dev vault kv put secret/test-key value=some-local-test-value >/dev/null && echo stored'
+
+PP_USER=$(node -e 'const fs=require("fs"),p=require("path");const t=JSON.parse(fs.readFileSync(p.join(process.env.PASSPORT_DIR,"passportrc"),"utf8")).login._profiles[0].workos.accessToken;console.log(JSON.parse(Buffer.from(t.split(".")[1],"base64url")).sub)')
+st NS  "$(api POST /api/v1/namespaces "$(jq -nc --arg n "passport-proxy-$NAME-e2e" '{name:$n,description:"Passport proxy e2e demo"}')" | jq -r .body.data.id)"
+st RG  "$(api POST /api/v1/namespaces/$NS/resource-groups '{"name":"localhost","description":"Passport proxy e2e demo","source":"manual"}' | jq -r .body.data.id)"
+st REF "$(api POST /api/v2/secret-references "$(jq -nc --arg ns "$NS" '{namespaceId:$ns,name:"demo",vaultType:"hashicorp",vaultKey:"test-key"}')" | jq -r .body.data.id)"
+st EP  "$(api POST /api/v2/resource-endpoints "$(jq -nc --arg ns "$NS" --arg r "$REF" --arg g "$RG" '{namespaceId:$ns,method:"GET",host:"localhost",path:"/echo",secrets:[{label:"x-key",secretReferenceId:$r}],resourceGroupIds:[$g]}')" | jq -r .body.data.id)"
+st GR  "$(api POST /api/v2/access-grants "$(jq -nc --arg u "$PP_USER" --arg ns "$NS" --arg e "$EP" '{userId:$u,namespaceId:$ns,endpointIds:[$e],reason:"passport proxy e2e",validity:1}')" | jq -r '.body.data[0].id')"
+grep -E '^(PROXY_ID|NS|RG|REF|EP|GR)=' state.env
+```
+
+`st` refuses to record an empty value. If an ID comes back empty, run
+`passport auth status` (it refreshes the login token), then re-run only the
+lines that didn't record.
+
+- **Endpoint hosts never include a port.** The proxy strips the port from the
+  request but not from the stored host, so `localhost:9443` would never match.
+- **The resource group is what makes the endpoint visible in the web UI.** An
+  endpoint created without `resourceGroupIds` works, but never shows in
+  Passport Cloud. To fix one created earlier, run
+  `api PUT /api/v2/resource-endpoints/<id> "$(jq -nc --arg g "$RG" '{resourceGroupIds:[$g]}')"`.
+- **A secret reference only works with the proxy registration that was active
+  when it was created.** If you re-register with a new key, create new
+  references.
+
+---
+
+## 7. Issue your certificate, trust the CA, start the daemon
+
+```bash
+REPO=<repo>; . "$REPO/scripts/env.sh"
+passport setup --management-url https://$CF_DOMAIN --proxy-url https://$PROXY_HOST:8443; echo "setup exit=$?"
+```
+
+What the exit code means:
+- **`0`:** credentials issued **and** the daemon and environment are configured.
+- **`2`:** **partial.** Credentials are OK, but the daemon or environment step
+  failed (read the output). Setup is **not** complete.
+- **`1`:** failed.
+
+On success, setup prints `[5/5] daemon installed + HTTPS_PROXY set`.
+
+**[you] Trust the Passport CA** (needs `sudo` or admin, so it runs in the user's terminal):
+
+```bash
+passport ca install
+```
+
+- **On macOS** it runs
+  `sudo security add-trusted-cert -d -r trustRoot -p ssl -k /Library/Keychains/System.keychain ~/.passport/ca.pem`.
+  That adds the CA to the System keychain, trusted for the **SSL policy** only.
+- **On Windows** it adds the CA to `LocalMachine\Root`, with a UAC prompt.
+- **Undo** with `passport ca uninstall`.
+
+### 7.1 Validate trust with the SSL policy
+
+`passport ca status` reports whether the CA is *present*. On macOS it doesn't
+check the trust setting, so also verify against the SSL policy that `ca install`
+set:
+
+```bash
+passport ca status
+security verify-cert -c ~/.passport/ca.pem -p ssl -k /Library/Keychains/System.keychain   # macOS: expect "certificate verification successful"
+openssl x509 -in ~/.passport/ca.pem -noout -fingerprint -sha256                           # should match the sha256 that 'ca status' shows
+```
+
+---
+
+## 8. Verify everything (each item separately)
+
+### 8.1 Your identity
 
 ```bash
 passport whoami
 ```
 
-It should show `allowedApiRefs` with `GET localhost/echo` and
-`{{vault:<your secret reference's UUID>}}`.
+Expect your `teamId`, `allowedApiRefs` with `GET localhost/echo → {{vault:<REF>}}`,
+and a `notAfter` time.
 
----
+### 8.2 Explicit request with proxy and certificate flags
 
-## 8. Test it end to end
-
-The echo server and the proxy trust were already set up by user-data (an echo
-sidecar sharing the proxy's network namespace, so `localhost:9443` is exactly
-`localhost` from the proxy's point of view — which is why the endpoint host
-must be `localhost`).
+This needs no daemon, and the localhost demo **requires** it (see 8.3):
 
 ```bash
-source /tmp/pp-aws/state.env
-passport request "https://localhost:9443/echo" -H "x-key: {{vault:$REF}}"
-echo -n "some-local-test-value" | shasum -a 256          # must equal the sha256 in the response
-```
-
-On the instance, confirm the destination logged the same hash (it never
-logs the value itself):
-
-```bash
-onhost 'docker logs pp-echo 2>&1 | tail -1'              # onhost is defined in step 6.2
-```
-
-> `{{vault:...}}` **must** contain the secret reference's UUID, not its
-> friendly name — anything else streams through unsubstituted with no error.
-> MDM Mac: run the request through `pp-cli-linux` (MDM guide, A.4).
-
-If you see a sha256 (not the literal `{{vault:...}}`) and it matches, the
-secret was resolved and injected by the proxy running **on EC2** — **a complete,
-verified end-to-end setup.**
-
-**Next, do step 8.1 right away** — it's the payoff of the whole setup.
-
-### 8.1 The value of Passport: use a secret you never see
-
-`passport request` is a thin wrapper. This plain `curl` does the same thing
-(`D` is the CLI's credentials folder: `~/.passport`, or
-`~/passport-cli-dl/.passport` on the MDM path; re-run `passport setup` first if
-the ~5-minute cert has expired):
-
-```bash
-source /tmp/pp-aws/state.env
-D=~/.passport                                    # MDM: ~/passport-cli-dl/.passport
-curl -s https://$CF_DOMAIN/ca.pem -o /tmp/pp-aws/proxy-ca.pem
-
-curl -sS --proxy https://$EIP:8443 \
-  --proxy-cacert $D/ca.pem --proxy-cert $D/cert.pem --proxy-key $D/key.pem \
+REPO=<repo>; . "$REPO/scripts/env.sh"
+curl -sS --proxy https://$PROXY_HOST:8443 \
+  --proxy-cacert ~/.passport/ca.pem --proxy-cert ~/.passport/cert.pem --proxy-key ~/.passport/key.pem \
   --cacert /tmp/pp-aws/proxy-ca.pem \
   -H "x-key: {{vault:$REF}}" \
   https://localhost:9443/echo
+echo -n "some-local-test-value" | shasum -a 256          # must equal "sha256" in the response
+onhost 'docker logs pp-echo 2>&1 | tail -1'             # the destination logged the same hash
 ```
 
-Output: `{"ok":true,"sha256":"a91317c5…a1f8"}`, the sha256 of the real secret
-(`some-local-test-value`).
+- **`--proxy-cacert`** trusts the proxy itself.
+- **`--cacert`** trusts the certificate the proxy presents for the destination,
+  which the proxy re-signs with its CA.
+- **`{{vault:…}}` needs the reference's UUID, not its name.** A name passes
+  through unchanged, with no error.
 
-**How the secret was used without being seen**
+### 8.3 Daemon status and environment
 
-1. **You only hold a pointer.** The header you sent is
-   `x-key: {{vault:<uuid>}}`. The UUID names a secret; it isn't the secret.
-   **Your machine, shell history and this guide never contain the value.**
-2. **Your identity is a short-lived client cert.** `passport setup` issued
-   `cert.pem` (about 5 min). It encodes *which* references you may use, on
-   *which* method, host and path (`GET localhost/echo`). That's the grant from
-   6.3. **Access is scoped to exactly what you were granted.**
-3. **The proxy checks, then swaps.** It verifies your cert, confirms the
-   request matches your grant, decrypts the reference to learn where the secret
-   lives (`test-key` in the instance's Vault), fetches it, and replaces
-   `{{vault:<uuid>}}` with the real value *in flight*, only for the allowed
-   host and path. **The real value is injected by the proxy, never by you.**
-4. **The destination gets the real value.** The echo server received it (its
-   hash matches ours). **Your side saw only the UUID going out and the response
-   coming back.**
+```bash
+passport daemon status        # pid, port (default 10144), upstream reachable, cert expiry
+echo "$HTTPS_PROXY"           # http://127.0.0.1:10144 — in a NEW terminal window after setup
+```
 
-**Result: you (or a script, or an AI agent) can call an API that needs a
-credential without ever holding that credential.** **It can't be leaked from
-your machine**, **it works only on endpoints you were granted**, and **access
-ends when the cert or grant expires.**
+- **macOS:** setup sets `HTTPS_PROXY`, `NO_PROXY`, `SSL_CERT_FILE`,
+  `NODE_EXTRA_CA_CERTS` and `REQUESTS_CA_BUNDLE` for your login session. The
+  terminal you ran setup in doesn't see them yet. Either quit the terminal app
+  completely and reopen it, or paste the `export …` lines that setup printed.
+- **Windows:** setup writes the same variables to the user environment.
+- **Shell rc file (optional):** `passport daemon install --write-to ~/.zshrc`
+  also appends the variables to your rc file. That block also sets
+  `NODE_OPTIONS=--use-env-proxy` (Node's built-in fetch ignores `HTTPS_PROXY`
+  without it) and `JAVA_TOOL_OPTIONS` proxy settings.
+- **The daemon only routes external hosts.** `NO_PROXY` always includes
+  `localhost`, `127.0.0.1`, `::1`, private IP ranges, `.local`, `.internal`,
+  `.svc`, `.cluster.local`, `.postmanlabs.com` and `.usepassport.ai`, plus
+  their `-beta`/`-stage` variants. That's why the localhost echo demo **can't**
+  use the daemon and needs 8.2's explicit flags. Real APIs (step 10) can use it.
+- **Linux:** setup can't install the daemon. Start it with
+  `passport daemon start`, then export the variables yourself:
+  `HTTPS_PROXY=http://127.0.0.1:10144`, and `SSL_CERT_FILE`,
+  `NODE_EXTRA_CA_CERTS` and `REQUESTS_CA_BUNDLE` set to `~/.passport/ca.pem`.
+
+### 8.4 Certificate lifetime and renewal
+
+- **Expiry:** `notAfter` in `passport whoami` and `passport daemon status`.
+- **Requested vs actual:** the CLI requests 1 hour by default
+  (`passport setup --ttl <seconds>`), but the proxy may issue less. Earlier runs
+  got about 5 minutes. Report the real value.
+- **With the daemon:** it renews **on demand**. When a request starts with less
+  than 60 s left, it mints a new cert using your saved login. If the login has
+  also expired, run `passport login` then `passport setup`.
+- **Without the daemon:** `passport request` renews inline, but nothing renews
+  the files that plain `curl` reads, so run `passport setup` again.
+
+### 8.5 Success checklist (report each line as ✅ or ❌)
+
+1. `passport setup` exited `0`. An exit of `2` means the daemon or environment
+   step failed, so this line is ❌ even if the rest pass.
+2. `passport whoami` shows the `GET localhost/echo` grant and a future `notAfter`.
+3. `passport ca status` says trusted, **and** `security verify-cert … -p ssl`
+   succeeds (macOS).
+4. `passport daemon status` shows it running with the upstream reachable
+   (macOS/Windows; on Linux, after `daemon start`).
+5. The 8.2 request returned the expected sha256, and the echo log shows the same hash.
+
+**All five ✅ means setup is complete.** If only line 5 passes, report:
+*"requests work with explicit flags; the CLI/daemon setup is not complete:
+<items>"*, then fix those items or say what's blocking them.
 
 ---
 
-## 9. Add your own resources (call a real API through Passport)
+## 9. Mandatory handoff walkthrough (after 8.5 passes)
 
-The e2e test used the echo sidecar. Next, put one of *your* APIs behind the
-proxy on EC2, so you can try it with a credential you actually use.
+One self-contained message, using real values:
 
-### 9.1 Decide what to call
+**9.1 The request, verbatim.** Print the exact 8.2 command you ran, with every
+value filled in: `--proxy https://<PROXY_HOST>:8443`, the three `~/.passport`
+paths, `--cacert`, `-H "x-key: {{vault:<REF>}}"` and the URL. Then show its
+actual output.
 
-You need four things, and none of them is the secret value:
+**9.2 What each part did:**
+- **`--proxy https://<PROXY_HOST>:8443`:** the request goes to **your proxy on
+  EC2**, not straight to the destination.
+- **`--proxy-cert` and `--proxy-key`:** your short-lived client certificate. It
+  **identifies you** and lists the grants you hold (`GET localhost/echo`).
+- **`{{vault:<REF>}}`:** a **pointer** to a Vault entry (`test-key`). It isn't
+  the credential itself.
+- **The proxy:** checks the certificate and checks that the request matches a
+  grant. It then decrypts the reference with its bootstrap key (`ref.pem`, on
+  the instance), reads the value from Vault, and **injects it in flight**, only
+  for the granted method, host and path.
 
-| Ask | Example |
+**9.3 What the test proved, stated honestly:**
+- **The proxy resolved and injected the value.** The destination received it,
+  and its logged sha256 matches the known value.
+- **The request carried only the pointer.** The request and its tools held
+  `{{vault:<REF>}}`, never the value.
+- **This was a fake test value.** Because it's known, it *was* present locally,
+  in this guide and in the `shasum` check. Don't claim it never touched the
+  machine.
+- **Real credentials (step 10) work differently.** The value is typed only into
+  a hidden prompt on the instance, and never reaches the requester's machine,
+  shell history or this conversation.
+
+**9.4 Expiry and renewal:** state the real `notAfter`, then explain 8.4 in two
+sentences.
+
+**9.5 Two ways to make requests:**
+- **Explicit flags** (as in 9.1): works anywhere and needs no daemon. It's
+  required for `localhost` and the other `NO_PROXY` destinations.
+- **Through the daemon:** in a new terminal, a plain
+  `curl -H "Authorization: Bearer {{vault:<uuid>}}" https://api.example.com/...`.
+  `HTTPS_PROXY` routes it, and `SSL_CERT_FILE` trusts the CA. Step 10 shows it
+  for real.
+
+**9.6 Next:**
+- Offer step 10 (your own API) and step 11 (protection demos).
+- Close with the resource status:
+  `bash "$REPO/scripts/aws-resources.sh" show /tmp/pp-aws/state.env`.
+- List any open ❌ from 8.5.
+- Remind the user that **nothing is deleted until they explicitly ask for cleanup.**
+
+---
+
+## 10. Add your own API (offer it; the agent creates the Passport objects itself)
+
+Ask for these. The credential's **value** is never one of them:
+
+| Input | Example |
 |---|---|
-| Method and full URL | `GET https://api.github.com/user` |
-| How the API takes the credential | header `Authorization: Bearer …`, header `x-api-key: …`, or a query param `?api_key=…` |
-| A name for the secret in Vault | `github-token` |
-| Should it be grouped with an existing host? | reuse the resource group if one with that host already exists |
+| Method and URL | `GET https://api.example.com/me` |
+| Credential format | `Authorization: Bearer …`, `x-api-key: …`, or a query parameter `?api_key=…` |
+| Vault key name | `example-api-token` |
 
-The API must be reachable from the instance (public internet works; the
-security group's default egress allows it). The proxy trusts the system CA
-bundle (`trust.pem` from user-data), so publicly trusted HTTPS certificates
-work as-is.
+The API must be reachable from the instance: the public internet works, since
+the security group's default egress allows it. The proxy trusts the system CA
+bundle, so publicly trusted HTTPS certificates work as they are.
 
-### 9.2 What has to be set, in order
+**The sequence:**
 
-| What | Where | Why |
-|---|---|---|
-| The secret value | the instance's Vault, `secret/<vault-key>` | the proxy fetches it from here at request time |
-| Secret reference | Passport Cloud | points at `<vault-key>`; its UUID is what goes in your requests |
-| Resource group | Passport Cloud | makes the endpoint show in the web UI (see 6.3) |
-| Endpoint | Passport Cloud | method + host (**no port**) + path (no query string), linked to the secret reference |
-| Access grant | Passport Cloud | lets your user call that endpoint |
-| Fresh `passport setup` | your CLI | the cert lists granted endpoints at the time it's issued |
+1. **[you] Store the credential privately** on the instance, through a hidden
+   prompt. It never goes on a command line, into SSM Run Command history, into
+   chat or into the agent's context. In your own terminal:
+   ```bash
+   aws ssm start-session --target <INSTANCE> --region <AWS_REGION> --profile <AWS_PROFILE>
+   sudo passport-vault-put example-api-token        # paste the token at the hidden prompt
+   exit
+   ```
+2. **The agent creates the Passport objects itself**, without asking. That's a
+   resource group for the host, a secret reference, an endpoint (host without a
+   port, path without a query string) and a grant for you:
+   ```bash
+   EP_METHOD=GET; EP_HOST=api.example.com; EP_PATH=/me; VKEY=example-api-token; HDR=Authorization
+   REPO=<repo>; . "$REPO/scripts/env.sh"; cd /tmp/pp-aws
+   PP_USER=$(node -e 'const fs=require("fs"),p=require("path");const t=JSON.parse(fs.readFileSync(p.join(process.env.PASSPORT_DIR,"passportrc"),"utf8")).login._profiles[0].workos.accessToken;console.log(JSON.parse(Buffer.from(t.split(".")[1],"base64url")).sub)')
+   RG_N=$(api POST /api/v1/namespaces/$NS/resource-groups "$(jq -nc --arg n "$EP_HOST" '{name:$n,description:"Added after e2e",source:"manual"}')" | jq -r .body.data.id)
+   REF_N=$(api POST /api/v2/secret-references "$(jq -nc --arg ns "$NS" --arg k "$VKEY" '{namespaceId:$ns,name:$k,vaultType:"hashicorp",vaultKey:$k}')" | jq -r .body.data.id)
+   EP_N=$(api POST /api/v2/resource-endpoints "$(jq -nc --arg ns "$NS" --arg m "$EP_METHOD" --arg h "$EP_HOST" --arg p "$EP_PATH" --arg l "$HDR" --arg r "$REF_N" --arg g "$RG_N" \
+     '{namespaceId:$ns,method:$m,host:$h,path:$p,secrets:[{label:$l,secretReferenceId:$r}],resourceGroupIds:[$g]}')" | jq -r .body.data.id)
+   GR_N=$(api POST /api/v2/access-grants "$(jq -nc --arg u "$PP_USER" --arg ns "$NS" --arg e "$EP_N" '{userId:$u,namespaceId:$ns,endpointIds:[$e],reason:"passport extra resource",validity:1}')" | jq -r '.body.data[0].id')
+   printf '%s RG=%s REF=%s EP=%s GR=%s\n' "$EP_METHOD $EP_HOST$EP_PATH" $RG_N $REF_N $EP_N $GR_N | tee -a resources.env
+   ```
+   `resources.env` keeps one line per added API, and cleanup reads it. If an ID
+   comes back empty, run `passport auth status` and re-run the block.
+3. **Refresh your certificate** so it includes the new grant. Run step 7's
+   `passport setup …`, then check that `passport whoami` lists the endpoint and
+   `{{vault:<REF_N>}}`.
+4. **Make the request in both forms**, with the real values:
+   ```bash
+   # explicit flags
+   curl -sS --proxy https://<PROXY_HOST>:8443 --proxy-cacert ~/.passport/ca.pem --proxy-cert ~/.passport/cert.pem \
+     --proxy-key ~/.passport/key.pem --cacert /tmp/pp-aws/proxy-ca.pem \
+     -H "Authorization: Bearer {{vault:<REF_N>}}" https://api.example.com/me
+   # through the daemon (new terminal, HTTPS_PROXY set by setup): no proxy or cert flags
+   curl -sS -H "Authorization: Bearer {{vault:<REF_N>}}" https://api.example.com/me
+   ```
+   - **What success looks like:** a 2xx from the API means the proxy injected the
+     real token. Don't print the body if it could echo the credential.
+   - **Query parameters:** if the credential goes in a query parameter, add `-g`.
+     Otherwise curl reads `{{` as URL-glob syntax and fails with
+     `nested brace in URL`.
 
-**9.2a Store the secret value: you do this, in your own terminal.** Don't use
-`onhost` for a real value: SSM Run Command keeps its parameters in command
-history. Open an interactive session instead (needs the AWS Session Manager
-plugin), type the value at a hidden prompt, and pass it on stdin:
+The credential is lost if the Vault container restarts, so re-run
+`passport-vault-put`. To check it without printing it, run
+`sudo passport-vault-sha256 example-api-token` inside a session, and compare the
+result with the sha256 of the token at its source.
 
-```bash
-source /tmp/pp-aws/state.env; aws ssm start-session --target $INSTANCE --profile $AWS_PROFILE --region $AWS_REGION
-# then, inside the session:
-sudo -i
-set -a; . /opt/passport/vault.env; set +a
-read -rs -p "Secret value: " V; echo
-printf %s "$V" | docker exec -i -e VAULT_ADDR=http://127.0.0.1:8200 -e VAULT_TOKEN=$VAULT_TOKEN \
-  pp-vault-dev vault kv put secret/<vault-key> value=- >/dev/null && echo stored; unset V
-exit; exit
-```
+---
 
-For a **fake** test value, the 6.2 `onhost` form is fine. The Vault is
-in-memory dev mode: a reboot of the Vault container loses every value, so
-re-run this. The proxy caches HashiCorp lookups (~60 s by default), so a
-changed value shows up on the next request after that window. KV v2 versions
-writes, so old values are kept.
+## 11. Protection demos (offer one at a time, explain each result)
 
-**9.2b Create the Passport Cloud objects** (fill in the first line):
-
-```bash
-EP_METHOD=GET; EP_HOST=api.github.com; EP_PATH=/user; VKEY=github-token; HDR=Authorization
-source /tmp/pp-aws/state.env; cd /tmp/pp-aws
-export PASSPORT_DIR=~/.passport                  # MDM: ~/passport-cli-dl/.passport
-api() { node /tmp/pp-aws/passport-api.js "$@"; }
-PP_USER=$(node -e 'const fs=require("fs"),p=require("path");const rc=JSON.parse(fs.readFileSync(p.join(process.env.PASSPORT_DIR,"passportrc"),"utf8"));console.log(JSON.parse(Buffer.from(rc.login._profiles[0].workos.accessToken.split(".")[1],"base64url")).sub)')
-
-RG_N=$(api POST /api/v1/namespaces/$NS/resource-groups "$(jq -nc --arg n "$EP_HOST" '{name:$n,description:"Added after e2e",source:"manual"}')" | jq -r '.body.data.id')
-REF_N=$(api POST /api/v2/secret-references "$(jq -nc --arg ns "$NS" --arg k "$VKEY" '{namespaceId:$ns,name:$k,vaultType:"hashicorp",vaultKey:$k}')" | jq -r '.body.data.id')
-EP_N=$(api POST /api/v2/resource-endpoints "$(jq -nc --arg ns "$NS" --arg m "$EP_METHOD" --arg h "$EP_HOST" --arg p "$EP_PATH" --arg l "$HDR" --arg r "$REF_N" --arg g "$RG_N" \
-  '{namespaceId:$ns,method:$m,host:$h,path:$p,secrets:[{label:$l,secretReferenceId:$r}],resourceGroupIds:[$g]}')" | jq -r '.body.data.id')
-GR_N=$(api POST /api/v2/access-grants "$(jq -nc --arg u "$PP_USER" --arg ns "$NS" --arg e "$EP_N" '{userId:$u,namespaceId:$ns,endpointIds:[$e],reason:"passport extra resource",validity:1}')" | jq -r '.body.data[0].id')
-printf '%s RG=%s REF=%s EP=%s GR=%s\n' "$EP_METHOD $EP_HOST$EP_PATH" $RG_N $REF_N $EP_N $GR_N | tee -a resources.env
-```
-
-If any ID comes back empty, run `passport auth status` (it refreshes the login
-token) and re-run the block. To reuse an existing group for the same host, set
-`RG_N` to its ID and skip that line. `resources.env` keeps one line per
-resource for cleanup (step 10.1).
-
-**9.2c Refresh the cert**, then check `passport whoami` lists the new endpoint
-and `{{vault:<REF_N>}}`:
-
-```bash
-source /tmp/pp-aws/state.env
-passport setup --management-url https://$CF_DOMAIN --proxy-url https://$PROXY_HOST:8443
-passport whoami
-```
-
-(MDM: the A.4 container form.)
-
-### 9.3 The full `curl`, with the proxy and cert flags
-
-Put the `{{vault:<uuid>}}` pointer exactly where the API expects the credential:
-
-```bash
-source /tmp/pp-aws/state.env
-D=~/.passport                                    # MDM: ~/passport-cli-dl/.passport
-curl -sS --proxy https://$EIP:8443 \
-  --proxy-cacert $D/ca.pem --proxy-cert $D/cert.pem --proxy-key $D/key.pem \
-  --cacert /tmp/pp-aws/proxy-ca.pem \
-  -H "Authorization: Bearer {{vault:<REF_N>}}" \
-  "https://api.github.com/user"
-```
-
-- `/tmp/pp-aws/proxy-ca.pem` is the CA downloaded in 8.1; it trusts the
-  certificate the proxy presents for the destination.
-- Credential in a **query param**? Add `-g`. Without it, curl reads `{{` as its
-  own URL-glob syntax and fails with `nested brace in URL`:
-  `curl -sS -g … "https://api.example.com/v1/items?api_key={{vault:<REF_N>}}"`.
-- The pointer can also go in the body or URL path (per the CLI's `whoami`
-  text; only headers and query params were tested).
-
-### 9.4 Use the default proxy with env vars, so curl needs no proxy or cert flags
-
-The CLI's **daemon** is a small local proxy on `http://127.0.0.1:10144`. It
-holds your client cert, talks mTLS to the Passport proxy on EC2 for you, and fetches a fresh
-cert when the ~5-minute one runs out. Once your shell has the daemon's env
-vars, a plain request with only the `{{vault:<uuid>}}` pointer goes through
-Passport.
-
-**macOS / Windows (not MDM): let `passport setup` do it.** Run setup *without*
-`--no-daemon`, as step 7 already does:
-
-```bash
-source /tmp/pp-aws/state.env
-passport setup --management-url https://$CF_DOMAIN --proxy-url https://$PROXY_HOST:8443
-```
-
-It installs the daemon and sets `HTTPS_PROXY`, `NO_PROXY`,
-`NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE` and `SSL_CERT_FILE` for your login
-session (`[5/5] daemon installed + HTTPS_PROXY set`). The terminal you ran it
-in doesn't see them yet, and setup prints two ways to fix that:
-
-- quit your terminal app completely (not just the tab) and reopen it, **or**
-- paste the `export …` lines setup prints into the current session.
-
-Then check, and trust the Passport CA for tools that use the OS trust store
-(setup warns `The Passport CA is not trusted by this machine` until you do):
-
-```bash
-echo $HTTPS_PROXY                  # http://127.0.0.1:10144
-passport ca install                # system keychain; runs under sudo. Undo: passport ca uninstall
-passport daemon status             # upstream reachable, cert expiry, request counts
-```
-
-Now the plain `curl`, with no proxy or cert flags:
-
-```bash
-curl -sS -H "Authorization: Bearer {{vault:<REF_N>}}" "https://api.github.com/user"
-```
-
-- Interactive shells only? `passport daemon install --write-to ~/.zshrc` also
-  appends the vars to your rc file. That block adds
-  `NODE_OPTIONS=--use-env-proxy` (Node's built-in HTTP/fetch ignores
-  `HTTPS_PROXY` without it) and `JAVA_TOOL_OPTIONS` proxy settings for JVMs.
-- `passport ca install` doesn't replace `NODE_EXTRA_CA_CERTS`: Node uses its
-  own bundled roots, so it needs both.
-
-**Linux:** automatic install isn't supported there, so start the daemon and
-export the vars yourself:
-
-```bash
-passport daemon start
-export HTTPS_PROXY=http://127.0.0.1:10144
-export SSL_CERT_FILE=~/.passport/ca.pem REQUESTS_CA_BUNDLE=~/.passport/ca.pem NODE_EXTRA_CA_CERTS=~/.passport/ca.pem
-curl -sS -H "Authorization: Bearer {{vault:<REF_N>}}" "https://api.github.com/user"
-```
-
-**The daemon only routes external hosts.** It always sends these direct,
-never through Passport: `localhost`, `127.0.0.1`, `::1`, private IP ranges,
-`.local`, `.internal`, `.svc`, `.cluster.local`, `.postmanlabs.com` (and its
-`-beta`/`-stage` variants) and `.usepassport.ai` (and its `-beta`/`-stage`
-variants). So the step 8 `localhost:9443` echo test, or an API on
-those domains, needs the explicit curl from 9.3.
-`passport daemon stop` stops the daemon.
-
-> **Verified 2026-10-06 on the local Docker setup only** (same proxy image,
-> CLI and API calls; MDM container path, `postman-echo.com`, fake value):
-> both curls delivered the Vault value with a matching sha256, and the daemon
-> renewed its expired cert on its own. Not yet run
-> against the EC2 proxy, and the 9.2a SSM-session step is untested.
-
-### 9.5 Show what Passport protects: scope, audit, revoke, rotate
-
-Four short demos on the resource you added (or the e2e one). Each takes a
-minute and shows one thing a plain API key can't do. Use the explicit curl
-form from 9.3 (it works for every host); `$D` is `~/.passport` (MDM: `~/passport-cli-dl/.passport`), `PROXY=https://$EIP:8443`, and use `--cacert /tmp/pp-aws/proxy-ca.pem` in place of `--cacert $D/ca.pem`.
+Use the explicit form from 8.2 or 10.4. Each demo shows one thing a plain API
+key can't do.
 
 **A. A leaked pointer is useless anywhere else.** Send the *same* pointer to a
-path, or a host, that wasn't granted:
+path or host that wasn't granted:
 
 ```bash
-curl -sS --proxy $PROXY --proxy-cacert $D/ca.pem --proxy-cert $D/cert.pem --proxy-key $D/key.pem --cacert $D/ca.pem \
-  -H "x-api-key: {{vault:<REF_N>}}" "https://<granted-host>/some-other-path"
-curl -sS --proxy $PROXY --proxy-cacert $D/ca.pem --proxy-cert $D/cert.pem --proxy-key $D/key.pem --cacert $D/ca.pem \
-  -H "x-api-key: {{vault:<REF_N>}}" "https://httpbin.org/headers"
+curl -sS --proxy https://$PROXY_HOST:8443 --proxy-cacert ~/.passport/ca.pem --proxy-cert ~/.passport/cert.pem --proxy-key ~/.passport/key.pem \
+  --cacert /tmp/pp-aws/proxy-ca.pem -H "x-key: {{vault:$REF}}" https://localhost:9443/not-granted
+curl -sS --proxy https://$PROXY_HOST:8443 --proxy-cacert ~/.passport/ca.pem --proxy-cert ~/.passport/cert.pem --proxy-key ~/.passport/key.pem \
+  --cacert /tmp/pp-aws/proxy-ca.pem -H "x-key: {{vault:$REF}}" https://httpbin.org/headers
 ```
 
 Both are refused with `passport: not authorized for vault refs: [<uuid>]`.
-The secret is only ever injected on the exact method, host and path that
-was granted. A pointer that ends up in a log, a copied script or a
-prompt-injected AI agent can't be used to send the secret anywhere else.
+- **This proves:** the secret is only injected on the exact method, host and
+  path that were granted.
+- **Why it matters:** a pointer that ends up in a log, a copied script or a
+  prompt-injected AI agent can't be used to send the secret anywhere else.
 
 **B. Every call is audited, and the logs never hold the secret.**
 
@@ -930,144 +732,107 @@ onhost 'docker logs pp-proxy-local 2>&1 | grep passport.proxy.request | tail -10
   | [$a["http.request.method"], $a["server.address"] + $a["http.route"], $a["passport.outcome"], $a["enduser.id"]] | @tsv'
 ```
 
-Each line shows method, host and path, outcome (`success` / `unauthorized`)
-and the user ID. The records carry secret reference UUIDs, never values.
-`onhost` is from step 6.2; the logs stay on the instance and only this summary comes back.
+Each line shows the method, host and path, the outcome (`success` or
+`unauthorized`) and the user ID. The records carry secret-reference UUIDs,
+never values.
 
-**C. Revoke a grant and access ends.** Delete the grant, get a new cert, and
-the same call is refused:
-
-```bash
-source /tmp/pp-aws/state.env; cd /tmp/pp-aws; export PASSPORT_DIR=~/.passport   # MDM: ~/passport-cli-dl/.passport
-api() { node /tmp/pp-aws/passport-api.js "$@"; }
-api DELETE /api/v2/access-grants/$GR_N
-passport setup --management-url https://$CF_DOMAIN --proxy-url https://$PROXY_HOST:8443
-passport whoami                                  # the endpoint is gone from allowedApiRefs
-# the curl from 9.3 now returns: passport: not authorized for vault refs: [<uuid>]
-```
-
-Every issued cert lasts ~5 minutes, so even a copied cert stops working
-shortly after a revoke. To restore access, create the grant again (the
-`GR_N=…` line from the add-a-resource block) and update its `GR=` value in
-`/tmp/pp-aws/resources.env`.
-
-**D. Rotate the secret: no client changes.** Write a new value under the same
-Vault key (user does this, as in the add-a-resource step), then run the
-*same* curl again:
+**C. Revoke a grant and access ends.** Once the user picks this demo, delete the grant yourself, get a
+new certificate, and repeat the call:
 
 ```bash
-# the interactive SSM session from 9.2a, writing to the same secret/<vault-key>
-```
-
-The same `{{vault:<REF_N>}}` pointer now delivers the new value. The proxy caches HashiCorp lookups (~60 s by default), so the change shows up within that window.
-No script, config, CI variable or teammate's laptop needs an update.
-
-> **Verified 2026-10-06** on the local Docker setup only (same proxy image and CLI); not yet run against the EC2 proxy, with `postman-echo.com` and fake values:
-> A refused both the other path and `httpbin.org`; B listed every call with no
-> secret value in the logs; C refused the call after the revoke and a fresh
-> cert; D delivered the rotated value on the same pointer 28 s after the Vault write.
-
-**What to tell the user**, in their terms:
-
-- **Nothing to leak.** No API key on laptops, in repos, in CI or in an AI
-  agent's context.
-- **Least privilege.** Access is per method, host and path, per person.
-- **Instant control.** Revoke or rotate centrally.
-- **A full audit trail.** Who called what, and whether it was allowed.
-
-It works with the tools they already use: curl, scripts and SDKs through the
-daemon env vars.
-
----
-
-## 10. Cleanup (only after you confirm you're done testing)
-
-**Don't run this until you've actually said you're done.** It deletes real AWS
-resources and real objects in your Passport Cloud team. Show the list from
-`state.env` and get one yes. Delete in this order; a failure on one step
-shouldn't stop you reporting the rest.
-
-```bash
-source /tmp/pp-aws/state.env; export AWS_PROFILE AWS_REGION; export PASSPORT_DIR=~/.passport   # MDM: ~/passport-cli-dl/.passport
-api() { node /tmp/pp-aws/passport-api.js "$@"; }
-
-# 10.1 Passport Cloud (refresh the token first if needed: passport auth status)
-# resources added in step 9 first, then the e2e ones
-[ -f /tmp/pp-aws/resources.env ] && while read -r m u rest; do
-  eval "$rest"   # sets RG REF EP GR for that resource
-  api DELETE /api/v2/access-grants/$GR; api DELETE /api/v2/resource-endpoints/$EP
-  api DELETE /api/v1/resource-groups/$RG; api DELETE /api/v2/secret-references/$REF
-done < /tmp/pp-aws/resources.env
-source /tmp/pp-aws/state.env    # restore the e2e IDs the loop overwrote
-passport daemon stop
+REPO=<repo>; . "$REPO/scripts/env.sh"
 api DELETE /api/v2/access-grants/$GR
-api DELETE /api/v2/resource-endpoints/$EP
-api DELETE /api/v1/resource-groups/$RG
-api DELETE /api/v2/secret-references/$REF      # 409 while an endpoint still maps it
-api DELETE /api/v1/namespaces/$NS
-api DELETE /api/v2/tenant/config/$PROXY_ID     # the proxy registration — the route takes the proxyId UUID, not a numeric id
-
-# 10.2a CloudFront: disable -> wait deployed -> delete distribution -> delete function (several minutes)
-CFG=$(aws cloudfront get-distribution-config --id $CF_DIST); ET=$(echo "$CFG" | jq -r .ETag)
-echo "$CFG" | jq '.DistributionConfig|.Enabled=false' > /tmp/pp-aws/cf-disabled.json
-aws cloudfront update-distribution --id $CF_DIST --if-match $ET --distribution-config file:///tmp/pp-aws/cf-disabled.json >/dev/null
-aws cloudfront wait distribution-deployed --id $CF_DIST
-aws cloudfront delete-distribution --id $CF_DIST --if-match $(aws cloudfront get-distribution --id $CF_DIST --query ETag --output text)
-aws cloudfront delete-function --name $CF_FUNCTION --if-match $(aws cloudfront describe-function --name $CF_FUNCTION --query ETag --output text)
-
-# 10.2 EC2: terminate (this permanently deletes the instance's Vault data), then release the EIP
-aws ec2 terminate-instances --instance-ids $INSTANCE >/dev/null
-aws ec2 wait instance-terminated --instance-ids $INSTANCE
-aws ec2 release-address --allocation-id $ALLOC
-
-# 10.3 IAM
-aws iam remove-role-from-instance-profile --instance-profile-name $PROFILE --role-name $ROLE
-aws iam delete-instance-profile --instance-profile-name $PROFILE
-aws iam delete-role-policy --role-name $ROLE --policy-name passport-proxy-ssm
-aws iam delete-role-policy --role-name $ROLE --policy-name passport-proxy-secrets
-aws iam delete-role --role-name $ROLE
-
-# 10.4 Security group (after the instance is gone)
-aws ec2 delete-security-group --group-id $SG
-
-# 10.5 Secrets: the proxy keys AND the registry key. Deleting the keys makes every secret reference made for
-# this proxy undecryptable — fine here, since the registration is removed above. For a throwaway test use
-# --force-delete-without-recovery: a recovery window (min 7 days) blocks re-creating the same name (step 3.2).
-# For a real proxy use --recovery-window-in-days 7 instead.
-for s in ca-key reference-key registry-key; do
-  aws secretsmanager delete-secret --secret-id passport/$NAME/$s --force-delete-without-recovery --query Name --output text
-done
-
-# 10.6 Local files
-rm -rf /tmp/pp-aws
+passport setup --management-url https://$CF_DOMAIN --proxy-url https://$PROXY_HOST:8443
+passport whoami                       # the endpoint is gone from allowedApiRefs; 8.2 is now refused
 ```
 
-MDM guide (`guides/reference/aws-mdm-macs.md`) users also run: `docker rm -f pp-cli-linux; rm -rf ~/passport-cli-dl; pkill -f cb-forward.js`.
+- **This proves:** removing the grant cuts access once the cert is refreshed,
+  and the user never held the credential, so there's nothing for them to keep.
+- **Restore access:** re-run the `GR` line from step 6 (`st GR …`) to create
+  the grant again.
 
-If you wish to **keep** the keys (so a future proxy can reuse them and old
-references keep working), skip 10.5 and the registration delete in 10.1, and
-keep `/tmp/pp-aws/ca.pem` + `ref.pem` safe — they're recoverable from Secrets
-Manager (`passport/$NAME/ca-key`, `reference-key`) anyway.
+**D. Rotate the secret with no client changes.**
+1. In a session, the user runs `sudo passport-vault-put test-key` and enters a new value.
+2. Wait about 60 s, because the proxy caches lookups.
+3. Repeat 8.2.
+
+- **Expect:** the response sha256 changes to the new value's hash, using the
+  same pointer.
+- **This proves:** rotating the secret needs no change to any script,
+  configuration or laptop.
+
+**What to tell the user**, in their own terms:
+- **Nothing to leak:** no API key on laptops, in repos, in CI or in an AI agent's context.
+- **Least privilege:** access is per method, host and path, per person.
+- **Central control:** revoke or rotate from one place.
+- **An audit trail** of who called what, and whether it was allowed.
 
 ---
 
+## 12. Cleanup (only when the user explicitly asks): approval block D
 
-## Troubleshooting, MDM Macs, safety
+```bash
+REPO=<repo>; . "$REPO/scripts/env.sh"
+bash "$REPO/scripts/aws-resources.sh" delete /tmp/pp-aws/state.env
+```
+
+Show the user the printed plan word for word. It lists every ID in order, and
+checks that each one is tagged as ours. If it prints `STOP`, delete nothing and
+ask. After a yes, run exactly that plan:
+
+```bash
+REPO=<repo>; . "$REPO/scripts/env.sh"
+passport daemon stop
+# APIs added in step 10 first
+[ -s /tmp/pp-aws/resources.env ] && while read -r m u rest; do
+  eval "$rest"     # sets RG REF EP GR for that API
+  for p in access-grants/$GR resource-endpoints/$EP; do echo "$m $u $p -> $(api DELETE /api/v2/$p | jq -c .status)"; done
+  echo "$m $u resource-group -> $(api DELETE /api/v1/resource-groups/$RG | jq -c .status)"
+  echo "$m $u secret-reference -> $(api DELETE /api/v2/secret-references/$REF | jq -c .status)"
+done < /tmp/pp-aws/resources.env
+. /tmp/pp-aws/state.env    # restore the demo IDs the loop overwrote
+for p in ${GR:+access-grants/$GR} ${EP:+resource-endpoints/$EP}; do echo "$p -> $(api DELETE /api/v2/$p | jq -c .status)"; done
+[ -n "${RG:-}" ]  && echo "resource-group -> $(api DELETE /api/v1/resource-groups/$RG | jq -c .status)"
+[ -n "${REF:-}" ] && echo "secret-reference -> $(api DELETE /api/v2/secret-references/$REF | jq -c .status)"   # 409 while an endpoint still maps it
+[ -n "${NS:-}" ]  && echo "namespace -> $(api DELETE /api/v1/namespaces/$NS | jq -c .status)"
+[ -n "${PROXY_ID:-}" ] && echo "proxy registration -> $(api DELETE /api/v2/tenant/config/$PROXY_ID | jq -c .status)"
+if [ -n "${CF_DIST:-}" ]; then
+  CFG=$(aws cloudfront get-distribution-config --id $CF_DIST)
+  echo "$CFG" | jq '.DistributionConfig|.Enabled=false' > /tmp/pp-aws/cf-disabled.json
+  aws cloudfront update-distribution --id $CF_DIST --if-match "$(echo "$CFG" | jq -r .ETag)" --distribution-config file:///tmp/pp-aws/cf-disabled.json >/dev/null
+  aws cloudfront wait distribution-deployed --id $CF_DIST         # several minutes
+  aws cloudfront delete-distribution --id $CF_DIST --if-match "$(aws cloudfront get-distribution --id $CF_DIST --query ETag --output text)" && echo "deleted $CF_DIST"
+fi
+[ -n "${CF_FUNCTION:-}" ] && aws cloudfront delete-function --name $CF_FUNCTION --if-match "$(aws cloudfront describe-function --name $CF_FUNCTION --query ETag --output text)" && echo "deleted $CF_FUNCTION"
+[ -n "${INSTANCE:-}" ] && aws ec2 terminate-instances --instance-ids $INSTANCE >/dev/null && aws ec2 wait instance-terminated --instance-ids $INSTANCE && echo "terminated $INSTANCE"
+[ -n "${ALLOC:-}" ] && aws ec2 release-address --allocation-id $ALLOC && echo "released $ALLOC ($EIP)"
+[ -n "${PROFILE:-}" ] && aws iam remove-role-from-instance-profile --instance-profile-name $PROFILE --role-name $ROLE && aws iam delete-instance-profile --instance-profile-name $PROFILE && echo "deleted profile $PROFILE"
+[ -n "${ROLE:-}" ] && aws iam delete-role-policy --role-name $ROLE --policy-name passport-proxy-ssm && aws iam delete-role --role-name $ROLE && echo "deleted role $ROLE"
+[ -n "${SG:-}" ] && aws ec2 delete-security-group --group-id $SG && echo "deleted $SG"
+bash "$REPO/scripts/aws-resources.sh" show /tmp/pp-aws/state.env      # every AWS row should now say NOT FOUND
+```
+
+- **Report the result per row.** One failure must not hide the others.
+- **Then the local side**, with the user's OK: `passport ca uninstall` **[you]**
+  (needs sudo), `passport daemon uninstall`, and `rm -rf /tmp/pp-aws`.
+- **Terminating the instance destroys its bootstrap keys and its Vault.** That's
+  intended here. For a long-lived proxy, back up `/opt/passport/keys` first.
+
+---
+
+## Troubleshooting and MDM
 
 - Troubleshooting table: `guides/reference/aws-troubleshooting.md`
-- MDM-managed Macs (run the CLI in a Linux container): `guides/reference/aws-mdm-macs.md`
+- MDM-managed Macs: `guides/reference/aws-mdm-macs.md`
 
 ## Safety notes
 
-- Never paste a real secret's raw value, your registry key, an AWS credential
-  or a login token into chat, a commit, or a log you'll share — compare sha256
-  hashes instead (as step 8 does).
-- The Vault here is a disposable, in-memory **dev** server on a single
-  instance — fine for this test, never for anything you care about keeping.
-- 8443 is open **only** to your `/32`, and 8081 **only** to CloudFront's
-  origin-facing prefix list. If your IP changes, update the 8443 rule; never
-  widen either to `0.0.0.0/0`.
-- This setup creates real AWS resources (instance, EIP, role, security group,
-  secrets) that **cost money while they exist** and real objects in your
-  Passport Cloud team — clean them up (step 10) once you're done, especially on
-  a shared account.
+- **No secrets in chat or logs.** Never paste a real credential, the registry
+  key, an AWS key or a login token into chat, a commit or a shared log. Compare
+  sha256 hashes instead.
+- **Open ports.** 8443 is open only to your `/32`, and 8081 only to CloudFront's
+  prefix list. If your IP changes, update the 8443 rule; never use `0.0.0.0/0`.
+- **The Vault is dev mode, in memory.** That's fine for this setup, but it isn't
+  durable storage for production credentials.
+- **It costs money.** The instance, Elastic IP and CloudFront are billed while
+  they exist. Clean up (step 12) when you're done, especially on a shared account.
