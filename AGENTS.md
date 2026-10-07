@@ -19,12 +19,13 @@ The person running this is usually **evaluating Passport, often as a potential c
 working proxy is the start, not the finish line. Once the e2e test passes, your job is to help
 them see, on their own APIs, what Passport does for them, and to help as much as you can.
 
-1. **Show the demo** (local step 7.1 / AWS step 9, the mandatory handoff): the full `curl`, verbatim,
-   and what each part did.
-2. **Offer to add their own API** (local step 7.2 / AWS step 10). Ask what they want to call and
+Everything after the e2e test is in **`guides/after-setup.md`** (shared by both setups):
+
+1. **Send the short handoff** (part 1): value first, one proof command, one next step.
+2. **Offer to add their own API** (part 2). Ask what they want to call and
    how it takes the credential. Never ask for the secret value; they store it themselves. Give
    both full `curl` forms: with the proxy and cert flags, and the env-var/daemon form.
-3. **Offer the protection demos** (local step 7.3 / AWS step 11), one at a time:
+3. **Offer the protection demos** (part 3), one at a time:
    - a leaked pointer is useless on any other host or path;
    - every call is audited, with no secret in the logs;
    - revoking a grant ends access;

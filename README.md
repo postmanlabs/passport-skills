@@ -19,6 +19,7 @@ No agent? Open the guide and follow it by hand.
 |---|---|
 | [`guides/local-docker.md`](guides/local-docker.md) | Proxy + disposable HashiCorp Vault in Docker on your machine |
 | [`guides/aws-single-instance.md`](guides/aws-single-instance.md) | Proxy on one EC2 instance (stock Amazon Linux 2023), local Vault, CloudFront HTTPS management, read-only preflight, full cleanup |
+| [`guides/after-setup.md`](guides/after-setup.md) | Shared by both: the handoff, adding your own API, protection demos |
 
 ## Prerequisites
 - A Passport Cloud team and a **registry key** (Org Settings → Registry; needs admin).
@@ -31,9 +32,10 @@ Secrets never go in chat, user-data or logs; every AWS change is confirmed first
 ## Layout
 ```
 AGENTS.md                 entry point for any agent (CLAUDE.md, GEMINI.md, .cursor/, .github/ are one-line shims)
-guides/                   step-by-step guides + reference/ (troubleshooting, MDM Macs)
-scripts/                  preflight.sh, passport-api.js
-templates/                user-data, CloudFront
+guides/                   local-docker.md, aws-single-instance.md, after-setup.md (shared post-setup)
+                          + reference/ (troubleshooting, MDM Macs)
+scripts/                  preflight.sh, env.sh, aws-resources.sh, passport-api.js
+templates/                user-data, CloudFront, operator-iam-policy.json
 .claude-plugin/, skills/  optional Claude Code plugin wrapper (same files, no duplication)
 ```
 

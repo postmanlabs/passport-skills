@@ -86,7 +86,7 @@ Check in this order, and stop at the first one that's wrong:
 | The endpoint works but doesn't show in the web UI | It was created without `resourceGroupIds`. Attach a resource group (step 6). |
 | `api` prints `token expired` / an ID comes back empty | Run `passport auth status` to refresh the login token, then re-run only the missing lines. |
 | `DELETE /api/v2/tenant/config/<id>` returns 404 | Use the `proxyId` UUID, not the numeric `id`. |
-| `DELETE /api/v2/secret-references/<id>` returns 409 | An endpoint still maps it. Delete the endpoint first (step 12's order). |
+| `DELETE /api/v2/secret-references/<id>` returns 409 | An endpoint still maps it. Delete the endpoint first (step 10's order). |
 
 ## MDM-managed Mac
 

@@ -107,9 +107,10 @@ explicit `curl` works but `setup` exited 2, the daemon isn't running, or the CA
 isn't trusted, say exactly that: *"requests work with explicit flags; the
 CLI/daemon setup is not complete: …"*.
 
-**Mandatory ending:** after step 8.5 passes, do the step 9 walkthrough, then
-offer step 10 (their own API) and step 11 (protection demos), one at a time.
-Never run cleanup (step 12) until the user explicitly asks for it.
+**Mandatory ending:** after step 8.5 passes, continue with
+`guides/after-setup.md`: the handoff, then their own API, then the protection
+demos, one at a time. Never run cleanup (step 10) until the user explicitly
+asks for it.
 
 **MDM-managed Mac:** switch to `guides/reference/aws-mdm-macs.md` as soon as any
 of these appears:
@@ -339,7 +340,7 @@ bash "$REPO/scripts/aws-resources.sh" show /tmp/pp-aws/state.env
 - **What to tell the user:** show `aws-resources.sh show` and explain the error.
 - **IAM propagation** (`… instance profile is invalid`): wait about 15 s and
   re-run only A5.
-- **Anything else:** roll back what was created (step 12, with approval), then retry.
+- **Anything else:** roll back what was created (step 10, with approval), then retry.
 
 Never re-run the whole block, because that creates duplicates.
 
@@ -624,180 +625,18 @@ echo "$HTTPS_PROXY"           # http://127.0.0.1:10144 — in a NEW terminal win
 
 ---
 
-## 9. Mandatory handoff (after 8.5 passes): show the value, briefly
+## 9. After setup: show the value, add an API, demos (mandatory)
 
-One short message. **Lead with the value**; keep details out unless asked. Use
-the real values. If any 8.5 line failed, say which one first, in one line.
-
-Template:
-
-> **✅ Passport is working. You just called an API with a key you never had.**
->
-> | | Without Passport | With Passport |
-> |---|---|---|
-> | Your script or AI agent holds | the real API key | only a pointer: `{{vault:<REF>}}` |
-> | If it leaks | anyone can use the key, anywhere | useless outside the one granted endpoint |
-> | To revoke or rotate | update every laptop, script and CI job | change it once, centrally |
->
-> **Proof.** You sent only the pointer; the API received the real key:
-> ```
-> curl -H "x-demo-api-key: {{vault:<REF>}}" https://passport-demo.mock.postman.postman.dev
-> → {"status":"authenticated","key":"sdfds**************","key_length":19}
-> ```
-> (Had the pointer reached the API unchanged, it would show `"key":"{{vau…","key_length":46`.)
->
-> **Try it on your own API?** Tell me the URL and how it takes the key (e.g.
-> `Authorization: Bearer`). You'll paste the key into a hidden prompt on your
-> server — never here — and I'll do the rest.
->
-> <sub>Running: proxy `<NAME>` on EC2 (~$0.70/day) · certificate auto-renews · nothing is deleted until you ask.</sub>
-
-Rules for this message:
-- **Show the daemon form** (no flags) as the proof when line 6 of 8.5 passed;
-  otherwise show the explicit form and say the daemon isn't set up yet.
-- **One next step:** their own API (step 10). Offer the protection demos
-  (step 11) only after that works, or if they ask.
-- **Be honest about the demo key.** It's the demo API's public sample key,
-  so it was in this guide. With their own key (step 10), the value is typed
-  only into a hidden prompt on the server and never reaches their machine,
-  shell history or this conversation. Say this only if they ask or it's relevant.
-- **On request only:** the full explicit `curl`, what each flag does (8.2),
-  certificate expiry and renewal (8.4), and the two request modes (8.3).
+Continue with **`guides/after-setup.md`**, which is shared with the local
+setup. Use its *AWS* load block. It covers:
+- the short handoff message;
+- adding your own API (you store the secret over an SSM session with
+  `passport-vault-put`; the agent creates the Passport objects);
+- the protection demos.
 
 ---
 
-## 10. Add your own API (offer it; the agent creates the Passport objects itself)
-
-Ask for these. The credential's **value** is never one of them:
-
-| Input | Example |
-|---|---|
-| Method and URL | `GET https://api.example.com/me` |
-| Credential format | `Authorization: Bearer …`, `x-api-key: …`, or a query parameter `?api_key=…` |
-| Vault key name | `example-api-token` |
-
-The API must be reachable from the instance: the public internet works, since
-the security group's default egress allows it. The proxy trusts the system CA
-bundle, so publicly trusted HTTPS certificates work as they are.
-
-**The sequence:**
-
-1. **[you] Store the credential privately** on the instance, through a hidden
-   prompt. It never goes on a command line, into SSM Run Command history, into
-   chat or into the agent's context. In your own terminal:
-   ```bash
-   aws ssm start-session --target <INSTANCE> --region <AWS_REGION> --profile <AWS_PROFILE>
-   sudo passport-vault-put example-api-token        # paste the token at the hidden prompt
-   exit
-   ```
-2. **The agent creates the Passport objects itself**, without asking. That's a
-   resource group for the host, a secret reference, an endpoint (host without a
-   port, path without a query string) and a grant for you:
-   ```bash
-   EP_METHOD=GET; EP_HOST=api.example.com; EP_PATH=/me; VKEY=example-api-token; HDR=Authorization
-   REPO=<repo>; . "$REPO/scripts/env.sh"; cd /tmp/pp-aws
-   PP_USER=$(node -e 'const fs=require("fs"),p=require("path");const t=JSON.parse(fs.readFileSync(p.join(process.env.PASSPORT_DIR,"passportrc"),"utf8")).login._profiles[0].workos.accessToken;console.log(JSON.parse(Buffer.from(t.split(".")[1],"base64url")).sub)')
-   RG_N=$(api POST /api/v1/namespaces/$NS/resource-groups "$(jq -nc --arg n "$EP_HOST" '{name:$n,description:"Added after e2e",source:"manual"}')" | jq -r .body.data.id)
-   api PUT /api/v2/tenant/config/$PROXY_ID '{"isDefault":true}' >/dev/null      # references are encrypted for the default proxy (step 6)
-   REF_N=$(api POST /api/v2/secret-references "$(jq -nc --arg ns "$NS" --arg k "$VKEY" '{namespaceId:$ns,name:$k,vaultType:"hashicorp",vaultKey:$k}')" | jq -r .body.data.id)
-   EP_N=$(api POST /api/v2/resource-endpoints "$(jq -nc --arg ns "$NS" --arg m "$EP_METHOD" --arg h "$EP_HOST" --arg p "$EP_PATH" --arg l "$HDR" --arg r "$REF_N" --arg g "$RG_N" \
-     '{namespaceId:$ns,method:$m,host:$h,path:$p,secrets:[{label:$l,secretReferenceId:$r}],resourceGroupIds:[$g]}')" | jq -r .body.data.id)
-   GR_N=$(api POST /api/v2/access-grants "$(jq -nc --arg u "$PP_USER" --arg ns "$NS" --arg e "$EP_N" '{userId:$u,namespaceId:$ns,endpointIds:[$e],reason:"passport extra resource",validity:1}')" | jq -r '.body.data[0].id')
-   printf '%s RG=%s REF=%s EP=%s GR=%s\n' "$EP_METHOD $EP_HOST$EP_PATH" $RG_N $REF_N $EP_N $GR_N | tee -a resources.env
-   [ -n "${PREV_DEFAULT:-}" ] && api PUT /api/v2/tenant/config/$PREV_DEFAULT '{"isDefault":true}' >/dev/null   # restore
-   ```
-   `resources.env` keeps one line per added API, and cleanup reads it. If an ID
-   comes back empty, run `passport auth status` and re-run the block.
-3. **Refresh your certificate** so it includes the new grant. Run step 7's
-   `passport setup …`, then check that `passport whoami` lists the endpoint and
-   `{{vault:<REF_N>}}`.
-4. **Make the request in both forms**, with the real values:
-   ```bash
-   # explicit flags
-   curl -sS --proxy https://<PROXY_HOST>:8443 --proxy-cacert ~/.passport/ca.pem --proxy-cert ~/.passport/cert.pem \
-     --proxy-key ~/.passport/key.pem --cacert /tmp/pp-aws/proxy-ca.pem \
-     -H "Authorization: Bearer {{vault:<REF_N>}}" https://api.example.com/me
-   # through the daemon (new terminal, HTTPS_PROXY set by setup): no proxy or cert flags
-   curl -sS -H "Authorization: Bearer {{vault:<REF_N>}}" https://api.example.com/me
-   ```
-   - **What success looks like:** a 2xx from the API means the proxy injected the
-     real token. Don't print the body if it could echo the credential.
-   - **Query parameters:** if the credential goes in a query parameter, add `-g`.
-     Otherwise curl reads `{{` as URL-glob syntax and fails with
-     `nested brace in URL`.
-
-The credential is lost if the Vault container restarts, so re-run
-`passport-vault-put`. To check it without printing it, run
-`sudo passport-vault-sha256 example-api-token` inside a session, and compare the
-result with the sha256 of the token at its source.
-
----
-
-## 11. Protection demos (offer one at a time, explain each result)
-
-Use the explicit form from 8.2 or 10.4. Each demo shows one thing a plain API
-key can't do.
-
-**A. A leaked pointer is useless anywhere else.** Send the *same* pointer to a
-host that wasn't granted:
-
-```bash
-curl -sS --proxy https://$PROXY_HOST:8443 --proxy-cacert ~/.passport/ca.pem --proxy-cert ~/.passport/cert.pem --proxy-key ~/.passport/key.pem \
-  --cacert /tmp/pp-aws/proxy-ca.pem -H "x-demo-api-key: {{vault:$REF}}" https://httpbin.org/headers
-```
-
-It's refused with `passport: not authorized for vault refs: [<uuid>]`.
-- **This proves:** the secret is only injected on the exact method, host and
-  path that were granted.
-- **Why it matters:** a pointer that ends up in a log, a copied script or a
-  prompt-injected AI agent can't be used to send the secret anywhere else.
-
-**B. Every call is audited, and the logs never hold the secret.**
-
-```bash
-onhost 'docker logs pp-proxy-local 2>&1 | grep passport.proxy.request | tail -10' | grep -o '{"resourceLogs".*' \
-  | jq -r '.resourceLogs[].scopeLogs[].logRecords[] | ([.attributes[] | {(.key): (.value|to_entries[0].value)}] | add) as $a
-  | [$a["http.request.method"], $a["server.address"] + $a["http.route"], $a["passport.outcome"], $a["enduser.id"]] | @tsv'
-```
-
-Each line shows the method, host and path, the outcome (`success` or
-`unauthorized`) and the user ID. The records carry secret-reference UUIDs,
-never values.
-
-**C. Revoke a grant and access ends.** Once the user picks this demo, delete the grant yourself, get a
-new certificate, and repeat the call:
-
-```bash
-REPO=<repo>; . "$REPO/scripts/env.sh"
-api DELETE /api/v2/access-grants/$GR
-passport setup --management-url https://$CF_DOMAIN --proxy-url https://$PROXY_HOST:8443
-passport whoami                       # the endpoint is gone from allowedApiRefs; 8.2 is now refused
-```
-
-- **This proves:** removing the grant cuts access once the cert is refreshed,
-  and the user never held the credential, so there's nothing for them to keep.
-- **Restore access:** re-run the `GR` line from step 6 (`st GR …`) to create
-  the grant again.
-
-**D. Rotate the secret with no client changes.**
-1. In a session, the user runs `sudo passport-vault-put demo-api-key` and enters a new value (any string).
-2. Wait about 60 s, because the proxy caches lookups.
-3. Repeat 8.2.
-
-- **Expect:** the demo API's response shows the new value's first 5 characters
-  and length, using the same pointer.
-- **This proves:** rotating the secret needs no change to any script,
-  configuration or laptop.
-
-**What to tell the user**, in their own terms:
-- **Nothing to leak:** no API key on laptops, in repos, in CI or in an AI agent's context.
-- **Least privilege:** access is per method, host and path, per person.
-- **Central control:** revoke or rotate from one place.
-- **An audit trail** of who called what, and whether it was allowed.
-
----
-
-## 12. Cleanup (only when the user explicitly asks): approval block D
+## 10. Cleanup (only when the user explicitly asks): approval block D
 
 ```bash
 REPO=<repo>; . "$REPO/scripts/env.sh"
@@ -811,7 +650,7 @@ ask. After a yes, run exactly that plan:
 ```bash
 REPO=<repo>; . "$REPO/scripts/env.sh"
 passport daemon stop
-# APIs added in step 10 first
+# APIs added via guides/after-setup.md part 2 first
 [ -s /tmp/pp-aws/resources.env ] && while read -r m u rest; do
   eval "$rest"     # sets RG REF EP GR for that API
   for p in access-grants/$GR resource-endpoints/$EP; do echo "$m $u $p -> $(api DELETE /api/v2/$p | jq -c .status)"; done
@@ -863,4 +702,4 @@ bash "$REPO/scripts/aws-resources.sh" show /tmp/pp-aws/state.env      # every AW
 - **The Vault is dev mode, in memory.** That's fine for this setup, but it isn't
   durable storage for production credentials.
 - **It costs money.** The instance, Elastic IP and CloudFront are billed while
-  they exist. Clean up (step 12) when you're done, especially on a shared account.
+  they exist. Clean up (step 10) when you're done, especially on a shared account.
