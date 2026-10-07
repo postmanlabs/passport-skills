@@ -74,12 +74,30 @@ which one first, in one line.
 > | If it leaks | anyone can use the key, anywhere | useless outside the one granted endpoint |
 > | To revoke or rotate | update every laptop, script and CI job | change it once, centrally |
 >
-> **Proof.** You sent only the pointer, and the API received the real key:
+> **What I ran**, exactly (copy-paste works):
+> ```bash
+> curl -sS --proxy https://localhost:8443 \
+>   --proxy-cacert ~/.passport/ca.pem --proxy-cert ~/.passport/cert.pem --proxy-key ~/.passport/key.pem \
+>   --cacert /tmp/pp-local/proxy-ca.pem \
+>   -H "x-demo-api-key: {{vault:d625f364-3d76-4a14-9db5-b217cbfd3e23}}" \
+>   https://passport-demo.mock.postman.postman.dev
 > ```
-> curl -H "x-demo-api-key: {{vault:<REF>}}" https://passport-demo.mock.postman.postman.dev
-> → {"status":"authenticated","key":"sdfds**************","key_length":19}
+> **What came back:**
 > ```
-> (If the pointer had reached the API unchanged, it would show `"key":"{{vau…","key_length":46`.)
+> {"status":"authenticated","key":"sdfds**************","key_length":19}
+> ```
+> The API saw a 19-character key starting `sdfds`, which is the real key. If the
+> pointer had reached it unchanged, it would show `"key":"{{vau…","key_length":46`.
+>
+> **How this request was allowed:**
+> ```
+> your certificate      user_01M479T6…, valid until 17:23 UTC (from `passport setup`)
+>  └─ access grant      fc78372c…   you may call ↓ for 1 day
+>     └─ endpoint       cec48684…   GET passport-demo.mock.postman.postman.dev /
+>        └─ header x-demo-api-key ← secret reference d625f364… ("demo")
+>                                    └─ Vault  secret/demo-api-key, on the proxy; never sent to you
+> ```
+> The proxy checked each link before it swapped the pointer for the real key.
 >
 > **Try it on your own API?** Tell me the URL and how it takes the key (for
 > example `Authorization: Bearer`). You'll store the key yourself through a
@@ -87,7 +105,15 @@ which one first, in one line.
 >
 > <sub>Footer, one line: where it runs (local Docker, or proxy `<NAME>` on EC2 at about $0.70/day) · certificate renewal · "nothing is deleted until you ask".</sub>
 
+(The IDs, paths and time above are from a real run; use yours.)
+
 Rules for this message:
+- **"What I ran" is the exact command, verbatim:** every flag and real value,
+  no `…` and no variables. "What came back" is its real output. Never summarise
+  either.
+- **The access chain uses the real IDs:** grant → endpoint (method, host,
+  path) → header → secret reference → Vault key, plus the certificate's expiry
+  from `passport whoami`. Shorten IDs to 8 characters plus `…`.
 - **The proof command.** Show the daemon form (no flags, as above) if the
   daemon is running. Otherwise show the explicit form you actually ran
   (`curl --proxy $PROXY … -H "x-demo-api-key: …" https://passport-demo…`), and
@@ -102,6 +128,23 @@ Rules for this message:
   certificate expiry and renewal, and the daemon (part 2, step 5).
 
 ---
+
+## How to report every step after this (parts 2 and 3)
+
+For each step you run, show three things, in this order:
+1. **What I ran:** the exact commands, verbatim, with real values. If several
+   commands ran (create objects, refresh the certificate, the request), show
+   them all, in order. For Passport API calls, show the call line
+   (`api POST /api/v2/access-grants …`) and the ID it returned.
+2. **What came back:** the real output. Trim long output, but never paraphrase it.
+3. **What it proves:** one plain sentence.
+
+When the access chain changes (an API added, a grant revoked or restored), show
+the chain again with the change marked:
+
+```
+ └─ access grant      a5087ac2…   ✗ revoked: the endpoint is no longer in your certificate
+```
 
 ## 2. Add your own API (call a real API through Passport)
 
