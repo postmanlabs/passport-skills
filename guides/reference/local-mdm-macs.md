@@ -163,7 +163,9 @@ listens on the container's own `127.0.0.1`, which your Mac can't reach. So:
 
 > **Verified 2026-10-07** on an MDM Mac. The block above, in a clean shell,
 > returned `"key":"sdfds**************","key_length":19`. Without the `export`
-> lines, the API got the pointer unchanged (`"{vau…",46`).
+> lines, the API got the pointer unchanged (`"{{vau…",46`).
+> After the first 5-minute certificate expired, the same command still worked:
+> the daemon minted a new certificate on that request, so you never re-run setup.
 
 Clean up the extra pieces alongside step 8's cleanup:
 
