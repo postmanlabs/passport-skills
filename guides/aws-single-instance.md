@@ -73,9 +73,17 @@ Ask once per block. Then:
   `bash "$REPO/scripts/aws-resources.sh" delete /tmp/pp-aws/state.env`. That
   script prints `STOP` if a recorded ID isn't tagged as ours. If it does, delete
   nothing and ask.
-- **Passport Cloud changes get the same treatment.** This covers the proxy
-  registration, namespace, resource group, reference, endpoint and grant: list
-  them, then ask.
+- **Passport Cloud API calls are yours to run, without asking.** This covers
+  registering the proxy and creating or deleting the namespace, resource group,
+  secret reference, endpoint and grant. The same goes for every `passport` CLI
+  command that needs no `sudo`, browser approval or secret value (`setup`,
+  `whoami`, `daemon status`, `ca status`, `request`).
+  - **Don't** ask permission for them.
+  - **Don't** ask the user to run them.
+  - **Do** run them, record the IDs with `st`, and say what you created.
+  - **One guard stays:** if the team already has a proxy, register yours with
+    `isDefault:false`, and tell the user why.
+  - **AWS changes still need the approval blocks above.**
 
 **Commands that need the human.** You can't type into the user's terminal, and
 they can't type into yours. Anything that needs a password, `sudo`, a browser
@@ -395,11 +403,12 @@ curl -s -m 10 -o /dev/null -D - --proxy https://$PROXY_HOST:8443 --proxy-insecur
 
 ---
 
-## 6. Passport Cloud: register the proxy and create the demo (approval block B)
+## 6. Passport Cloud: register the proxy and create the demo (agent runs it, no approval needed)
 
 First list what exists:
 `api GET /api/v2/tenant/config | jq -c '.body.data[]|{proxyId,proxyName,isDefault}'`.
-Then show this table and ask:
+Then run the block below without asking. Afterwards, tell the user what was
+created, using this table with the real IDs:
 
 | Action | Object | Name / value |
 |---|---|---|
@@ -629,7 +638,7 @@ sentences.
 
 ---
 
-## 10. Add your own API (offer it; approval block C for the Passport objects)
+## 10. Add your own API (offer it; the agent creates the Passport objects itself)
 
 Ask for these. The credential's **value** is never one of them:
 
@@ -653,7 +662,7 @@ bundle, so publicly trusted HTTPS certificates work as they are.
    sudo passport-vault-put example-api-token        # paste the token at the hidden prompt
    exit
    ```
-2. **The agent creates the Passport objects** after approval block C. That's a
+2. **The agent creates the Passport objects itself**, without asking. That's a
    resource group for the host, a secret reference, an endpoint (host without a
    port, path without a query string) and a grant for you:
    ```bash
@@ -727,7 +736,7 @@ Each line shows the method, host and path, the outcome (`success` or
 `unauthorized`) and the user ID. The records carry secret-reference UUIDs,
 never values.
 
-**C. Revoke a grant and access ends.** With approval, delete the grant, get a
+**C. Revoke a grant and access ends.** Once the user picks this demo, delete the grant yourself, get a
 new certificate, and repeat the call:
 
 ```bash

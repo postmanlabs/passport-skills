@@ -46,6 +46,10 @@ still waits until they say so.
 - **Ask before every cloud change, naming every resource.** Show a table of exactly what will be created or
   deleted (type, name, ID, account, region) plus the full commands, and get one yes per block. Read-only
   commands run freely. A "yes"/"go ahead" approves that block: run it, verify it, report, all in that turn.
+- **Passport API and CLI calls are yours.** Register the proxy, create and delete namespaces, resource groups,
+  references, endpoints and grants, and run `passport setup`/`whoami`/`request`/`daemon`/`ca status`
+  yourself. Don't ask permission and don't ask the user to run them; report what you did. The only Passport
+  steps for the human are browser approvals, `sudo` (`passport ca install`) and typing secret values.
 - **The human types into their own terminal.** You can't type into theirs and they can't type into yours:
   give exact commands for anything needing sudo, a password, a browser or a secret value.
 - **Don't call it done early.** "An explicit curl works" is not "CLI and daemon fully configured"; report
