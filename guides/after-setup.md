@@ -285,8 +285,14 @@ passport whoami                 # after the refresh: the endpoint is gone from a
 - **Expect:** the same call is now refused with `not authorized for vault refs`.
 - **This proves:** access ends centrally, and a copied certificate expires within
   minutes. The user never held the credential, so there's nothing for them to keep.
-- **Restore access:** create the grant again with the `GR` line from the block
-  that made it, and update its ID (`ids.env`/`state.env` or `resources.env`).
+- **Restore access** for an API added in part 2 (`EP_N` and `GR_N` from its `resources.env` line):
+  ```bash
+  PP_USER=$(node -e 'const fs=require("fs"),p=require("path");const t=JSON.parse(fs.readFileSync(p.join(process.env.PASSPORT_DIR,"passportrc"),"utf8")).login._profiles[0].workos.accessToken;console.log(JSON.parse(Buffer.from(t.split(".")[1],"base64url")).sub)')
+  NEW_GR=$(api POST /api/v2/access-grants "$(jq -nc --arg u "$PP_USER" --arg ns "$NS" --arg e "$EP_N" '{userId:$u,namespaceId:$ns,endpointIds:[$e],reason:"passport extra resource",validity:1}')" | jq -r '.body.data[0].id')
+  [ -n "$NEW_GR" ] && [ "$NEW_GR" != null ] && sed -i.bak "s/GR=$GR_N/GR=$NEW_GR/" $W/resources.env && echo "restored $NEW_GR"
+  ```
+  For the demo grant, use `$EP` and record the new ID as `GR` (local: edit
+  `ids.env`; AWS: `st GR "$NEW_GR"`). Then refresh the certificate (part 0).
 
 **D. Rotate the secret with no client changes.**
 1. **[you]** store a new value under the same Vault key (part 0 table).
@@ -304,6 +310,12 @@ passport whoami                 # after the refresh: the endpoint is gone from a
 > - **B** listed every call, with no secret value in the logs.
 > - **C** refused the call after the revoke and a fresh certificate.
 > - **D** delivered the rotated value on the same pointer 28 s after the Vault write.
+>
+> **Re-verified 2026-10-07 from this shared file** (local Docker, MDM container path,
+> `postman-echo.com`, fake values):
+> - **C:** after the revoke and a refresh, the endpoint left `whoami` and the call
+>   was refused. The restore commands above brought access back.
+> - **D:** the old value was returned at +0, +20 and +40 s, and the new value at +60 s.
 
 ---
 
