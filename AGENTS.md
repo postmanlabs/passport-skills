@@ -10,9 +10,9 @@ When the user says **"setup passport"** (or similar: "set up the Passport proxy"
 1. Ask which target they want — one question:
    - **Local Docker** → follow `guides/local-docker.md`
    - **AWS single EC2 instance** → follow `guides/aws-single-instance.md`
-2. Follow that guide **literally and do every step yourself**. Its first section lists the only things that
-   need the human (registry key, browser approvals, cloud login). Work from the repo root; `$REPO` in the
-   guides means the absolute path of this repository.
+2. Follow that guide **literally and do every step yourself**. The ground rules below apply to both
+   guides; each guide's agent section adds only what's specific to it. Work from the repo root; `$REPO`
+   in the guides means the absolute path of this repository.
 
 ## After setup: help the user see the value of Passport
 The person running this is usually **evaluating Passport, often as a potential customer**. A
@@ -49,19 +49,38 @@ still waits until they say so.
 - **Secret references are encrypted for the team's *default* proxy.** Make yours the default while creating
   references, then restore the previous default (the guides show how). Never register as non-default and
   create references; they won't decrypt.
-- **The human types into their own terminal.** You can't type into theirs and they can't type into yours:
-  give exact commands for anything needing sudo, a password, a browser or a secret value.
+- **The human types into their own terminal.** You can't type into theirs and they can't type into yours.
+  For anything needing sudo, a password, a browser or a secret value: give the exact commands in a code
+  block, say what they should see, wait for "done", then verify it yourself. Show login links on their own
+  line, as a full `https://` URL with the confirmation code. Never ask for a secret's value in chat.
 - **Don't call it done early.** "An explicit curl works" is not "CLI and daemon fully configured"; report
-  each check separately (AWS step 8.5).
-- **Never print or paste secrets:** registry key, private keys, Vault tokens, login tokens. Compare sha256s
-  instead. Never put a secret in user-data, a commit, or chat.
+  each check separately (AWS step 8.4, "Success checklist").
+- **Never print or paste secrets:** registry key, private keys, Vault tokens, login tokens, API credentials.
+  Public keys, IDs and sha256s are fine; compare sha256s instead. Never print an API response that could
+  contain a secret, and never put a secret in user-data, a commit, or chat.
 - **Never tear anything down** until the user explicitly says so.
 - **Check existing state first** and reuse it; record every resource you create so cleanup is exact.
-- If CLI output says `(from macOS managed plist)` (or the other MDM signs the guides list), switch to that
-  guide's MDM reference — don't probe the filesystem for it.
+- **Detect an MDM-managed Mac at the start** (step 1 of either guide): `passport daemon status` showing
+  `routing source managed`, CLI output saying `(from macOS managed plist)`, or the other signs in
+  `guides/reference/mdm-macs.md`. Then follow that file; don't probe the filesystem for the profile. On
+  AWS this must be settled before step 2, because the instance is built for the team the CLI reports.
+- **Long waits are not failures.** Some AWS waits take 3–15 minutes. If your command tool has a time
+  limit, give them a longer timeout or run them in the background, and re-run only the wait.
 
 ## Layout
-- `guides/` — the step-by-step guides; `guides/reference/` — troubleshooting and MDM-Mac details
+- `guides/` — `local-docker.md`, `aws-single-instance.md`, and `after-setup.md` (shared by both)
+- `guides/reference/` — shared by both setups: `concepts.md` (the why: default-proxy rule, endpoints,
+  certificates, daemon), `troubleshooting.md`, `mdm-macs.md`, `verification.md` (what has been tested, when)
 - `scripts/` — `preflight.sh` (read-only AWS checks + free name), `env.sh` (shared helpers), `aws-resources.sh`
   (what exists / what cleanup would delete, tag-checked), `passport-api.js` (Passport Cloud API helper)
 - `templates/` — EC2 user-data, CloudFront files, and `operator-iam-policy.json` (the AWS permissions the guide needs)
+
+## Maintaining these guides (when you edit this repo)
+- **One home per fact.** Rules: this file. Setup steps: the two guides. The why: `concepts.md`. Symptoms
+  and fixes: `troubleshooting.md`. What was tested and when: `verification.md` (not inline "verified on"
+  notes). Link to the home instead of copying it.
+- **Point at a file and a heading or step**, and update every pointer when you renumber. CI checks that
+  every repo path mentioned in a `.md` file exists.
+- **Command blocks must work in both bash and zsh** (macOS agents run zsh). Note that zsh skips `EXIT`
+  traps when `set -e` fires inside a function, so don't rely on a trap for clean-up; end steps with
+  `|| die …` instead (see AWS step 6).

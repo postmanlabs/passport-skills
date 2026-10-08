@@ -3,7 +3,7 @@
 This is shared by both setups. Use it once the end-to-end test in your setup
 guide passes:
 - **Local Docker:** `guides/local-docker.md` step 7 printed `INJECTED`.
-- **AWS:** `guides/aws-single-instance.md` step 8.5 passed.
+- **AWS:** `guides/aws-single-instance.md` step 8.4 (success checklist) passed.
 
 It has two parts, run in order:
 1. **Handoff:** one short message that shows the value.
@@ -41,8 +41,10 @@ PROXY=https://$PROXY_HOST:8443; MGMT=https://$CF_DOMAIN; DESTCA=/tmp/pp-aws/prox
 | `$W/resources.env` | one line per API added in part 2, which cleanup reads |
 
 **Refresh your certificate** after any grant change:
-- normally: `passport setup --management-url $MGMT --proxy-url $PROXY`;
-- on an MDM Mac: the container form from your MDM reference, with `--no-daemon`.
+- **local:** `passport setup --management-url $MGMT --proxy-url $PROXY`;
+  on an MDM Mac, the container form in `guides/reference/mdm-macs.md` (A.4);
+- **AWS:** `cli setup --management-url $MGMT --proxy-url $PROXY ${MDM:+--no-daemon}`
+  (works on an MDM Mac too).
 
 **[you] steps that differ by setup:**
 
@@ -131,7 +133,7 @@ Rules for this message:
   | **macOS** (not MDM), after `passport setup` installed the daemon | the block above. New terminal windows already have these variables, and the `export` lines just make that explicit |
   | **Windows** (PowerShell), after `passport setup` | `$env:HTTPS_PROXY="http://127.0.0.1:10144"; curl.exe -sS -H "x-demo-api-key: {{vault:<REF>}}" https://passport-demo.mock.postman.postman.dev`. `curl.exe` uses the Windows certificate store, so run `passport ca install` first. *Unverified* |
   | **Linux** | first `passport daemon start` (setup can't install the daemon on Linux), then the block above |
-  | **MDM-managed Mac** | the block above, with `SSL_CERT_FILE=~/passport-cli-dl/.passport/ca.pem`. It needs the daemon container from your MDM reference ("Daemon on an MDM Mac") |
+  | **MDM-managed Mac** | the block above, with `SSL_CERT_FILE=~/passport-cli-dl/.passport/ca.pem`. It needs the daemon container from `guides/reference/mdm-macs.md`, A.5 |
 
   If the daemon isn't running, give the explicit form ("What I ran") as the
   thing to copy, and say why.
@@ -213,20 +215,24 @@ REF_N=$(api POST /api/v2/secret-references "$(jq -nc --arg ns "$NS" --arg k "$VK
 EP_N=$(api POST /api/v2/resource-endpoints "$(jq -nc --arg ns "$NS" --arg m "$EP_METHOD" --arg h "$EP_HOST" --arg p "$EP_PATH" --arg l "$HDR" --arg r "$REF_N" --arg g "$RG_N" \
   '{namespaceId:$ns,method:$m,host:$h,path:$p,secrets:[{label:$l,secretReferenceId:$r}],resourceGroupIds:[$g]}')" | jq -r .body.data.id)
 GR_N=$(api POST /api/v2/access-grants "$(jq -nc --arg u "$PP_USER" --arg ns "$NS" --arg e "$EP_N" '{userId:$u,namespaceId:$ns,endpointIds:[$e],reason:"passport extra resource",validity:1}')" | jq -r '.body.data[0].id')
-if [ -n "$RG_N" ] && [ -n "$REF_N" ] && [ -n "$EP_N" ] && [ -n "$GR_N" ] && [ "$GR_N" != null ]; then
+OK=1; for v in "$RG_N" "$REF_N" "$EP_N" "$GR_N"; do case "$v" in ''|null) OK=;; esac; done   # a failed call gives "" or "null"
+if [ -n "$OK" ]; then
   printf '%s RG=%s REF=%s EP=%s GR=%s\n' "$EP_METHOD $EP_HOST$EP_PATH" $RG_N $REF_N $EP_N $GR_N | tee -a $W/resources.env
 else echo "INCOMPLETE: RG=$RG_N REF=$REF_N EP=$EP_N GR=$GR_N. Nothing recorded; delete any IDs shown, refresh the token, re-run" >&2; fi
 ```
 
 - **`INCOMPLETE`** usually means the login token expired (it lasts about an
-  hour). Delete any IDs it did create, run `passport auth status` (it refreshes
-  the token), then re-run the block. Only complete results are recorded.
+  hour); the failed call is also printed as `api: <method> <path> -> <status>`.
+  Delete any IDs it did create, run `passport auth status` (it refreshes the
+  token; AWS on an MDM Mac: `cli auth status`), then re-run the block. Only
+  complete results are recorded.
 - **Reusing a resource group for the same host:** set `RG_N` to its ID and skip
   that line.
-- **Why the default switch:** Passport encrypts a new reference for whichever
-  proxy is the team default when the reference is created, and the key is fixed
-  from then on. Restoring the previous default afterwards is safe. This was
-  verified in `passport-service` and in a live run on 2026-10-07.
+- **Why the default switch:** a new reference is encrypted for whichever proxy
+  is the team default when it's created, and that's fixed from then on, so
+  restoring the previous default afterwards is safe
+  (`guides/reference/concepts.md`, "Secret references are encrypted for the
+  team's default proxy").
 
 **3. Refresh the certificate** (part 0), then check that `passport whoami` lists
 the new endpoint and `{{vault:<REF_N>}}`.
@@ -250,53 +256,26 @@ curl -sS --proxy $PROXY \
 - **Body or URL path:** the CLI says the pointer also works there. Only headers
   and query parameters have been tested.
 
-**5. The daemon form: no proxy or certificate flags.** The CLI's **daemon** is a
-small local proxy on `http://127.0.0.1:10144`. It holds your client certificate,
-talks mTLS to the Passport proxy, and gets a fresh certificate when yours is
-about to expire. With its environment variables set, a plain request carrying
-only the pointer goes through Passport:
+**5. The daemon form: no proxy or certificate flags.** The CLI's daemon
+(`http://127.0.0.1:10144`) holds your client certificate and renews it, so a
+plain request carrying only the pointer goes through Passport once its
+environment variables are set:
 
 ```bash
 curl -sS -H "Authorization: Bearer {{vault:<REF_N>}}" "https://api.github.com/user"
 ```
 
-- **macOS/Windows (not MDM):** `passport setup` without `--no-daemon` installs
-  the daemon and sets `HTTPS_PROXY`, `NO_PROXY`, `NODE_EXTRA_CA_CERTS`,
-  `REQUESTS_CA_BUNDLE` and `SSL_CERT_FILE` for your login session. It prints
-  `[5/5] daemon installed + HTTPS_PROXY set`.
-  - **Pick up the variables:** the terminal you ran setup in doesn't see them
-    yet. Quit the terminal app completely (not just the tab) and reopen it, or
-    paste the `export …` lines setup printed.
-  - **Check:** `echo $HTTPS_PROXY` (should be `http://127.0.0.1:10144`) and
-    `passport daemon status`.
-  - **[you]** run `passport ca install` once (it needs `sudo`) for tools that
-    use the OS trust store.
-- **Linux:** setup can't install the daemon, so start it and export the variables yourself:
-  ```bash
-  passport daemon start
-  export HTTPS_PROXY=http://127.0.0.1:10144
-  export SSL_CERT_FILE=~/.passport/ca.pem REQUESTS_CA_BUNDLE=~/.passport/ca.pem NODE_EXTRA_CA_CERTS=~/.passport/ca.pem
-  ```
-- **MDM Mac:** the daemon isn't available on the container path. Use the explicit form.
-- **The daemon only routes external hosts.** These always go direct, never
-  through Passport: `localhost`, `127.0.0.1`, `::1`, private IP ranges,
-  `.local`, `.internal`, `.svc`, `.cluster.local`, `.postmanlabs.com` and
-  `.usepassport.ai`, plus their `-beta`/`-stage` variants. Use the explicit form
-  for an API on those hosts.
-- **Shell rc file:** `passport daemon install --write-to ~/.zshrc` adds the
-  variables to your rc file. It also adds `NODE_OPTIONS=--use-env-proxy` (Node's
-  built-in fetch ignores `HTTPS_PROXY` without it) and `JAVA_TOOL_OPTIONS`.
-- **Node needs both:** `passport ca install` doesn't replace
-  `NODE_EXTRA_CA_CERTS`, because Node uses its own bundled roots.
+- **macOS/Windows (not MDM):** `passport setup` without `--no-daemon` installed
+  it. Check with `echo $HTTPS_PROXY` (`http://127.0.0.1:10144`, in a terminal
+  opened after setup) and `passport daemon status`. For tools that use the OS
+  trust store, the user runs `passport ca install` once (it needs `sudo`).
+- **Linux:** `passport daemon start`, then export the variables yourself.
+- **MDM Mac:** only with the daemon container (`guides/reference/mdm-macs.md`,
+  A.5); otherwise use the explicit form.
+- **Hosts it never routes** (`localhost`, private ranges, `.internal`,
+  `.usepassport.ai` and others in `NO_PROXY`): use the explicit form for an API
+  on those. The full list, the per-platform variables, the rc-file option and
+  Node's needs: `guides/reference/concepts.md`, "Two ways to send a request".
 
-> **Verified 2026-10-06** on the local Docker setup (MDM container path, daemon
-> started by hand), with `postman-echo.com` and a fake value:
-> - **Both request forms** delivered the Vault value, in a header and in a query parameter.
-> - **The daemon** renewed its expired certificate by itself.
->
-> **Not run:** the non-MDM `passport setup` daemon install, and this part on EC2.
->
-> **Re-verified 2026-10-07 from this shared file** (local Docker, MDM container path):
-> - **Part 0 and the part 2 agent block** (with the default-proxy switch) created
->   all four objects for `GET postman-echo.com/headers`.
-> - **The explicit request** delivered the stored fake value.
+What has been verified for this part, and what hasn't:
+`guides/reference/verification.md`.

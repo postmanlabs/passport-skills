@@ -15,6 +15,13 @@ jobs:
           jq empty templates/*.json.tmpl 2>/dev/null || true
       - name: Entry points exist
         run: test -f AGENTS.md -a -f guides/local-docker.md -a -f guides/aws-single-instance.md
+      - name: Paths mentioned in markdown exist
+        run: |
+          missing=0
+          for f in $(grep -rhoE '(guides|scripts|templates)/[A-Za-z0-9_./-]+\.(md|sh|js|json|tmpl)' --include='*.md' . | sort -u); do
+            [ -e "$f" ] || { echo "missing: $f"; missing=1; }
+          done
+          exit $missing
       - name: SKILL.md frontmatter
         run: |
           for f in skills/*/SKILL.md; do
