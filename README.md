@@ -19,7 +19,7 @@ No agent? Open the guide and follow it by hand.
 |---|---|
 | [`guides/local-docker.md`](guides/local-docker.md) | Proxy + disposable HashiCorp Vault in Docker on your machine |
 | [`guides/aws-single-instance.md`](guides/aws-single-instance.md) | Proxy on one EC2 instance (stock Amazon Linux 2023), local Vault, CloudFront HTTPS management, read-only preflight, full cleanup |
-| [`guides/after-setup.md`](guides/after-setup.md) | Shared by both: the handoff, adding your own API, protection demos |
+| [`guides/after-setup.md`](guides/after-setup.md) | Shared by both: the handoff and adding your own API |
 
 ## Prerequisites
 - A Passport Cloud team and a **registry key** (Org Settings → Registry; needs admin).

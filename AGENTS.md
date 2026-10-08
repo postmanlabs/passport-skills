@@ -25,12 +25,7 @@ Everything after the e2e test is in **`guides/after-setup.md`** (shared by both 
 2. **Offer to add their own API** (part 2). Ask what they want to call and
    how it takes the credential. Never ask for the secret value; they store it themselves. Give
    both full `curl` forms: with the proxy and cert flags, and the env-var/daemon form.
-3. **Offer the protection demos** (part 3), one at a time:
-   - a leaked pointer is useless on any other host or path;
-   - every call is audited, with no secret in the logs;
-   - revoking a grant ends access;
-   - rotating the value in Vault needs no client change.
-4. **Suggest next steps that fit what they told you:**
+3. **Suggest next steps that fit what they told you:**
    - their own script or SDK, via the daemon env vars;
    - an AI agent calling an API without holding the key;
    - more endpoints for a teammate.
