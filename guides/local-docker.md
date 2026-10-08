@@ -13,60 +13,39 @@ toolchain needed. By the end you'll have:
 It assumes no prior Passport knowledge, just
 comfort with a terminal and Docker.
 
-> **Verified 2026-10-05:** every command below was run end-to-end against the
-> real `ociregistry.usepassport.ai/passport/passport-proxy:latest` image and
-> a real Passport Cloud team — CLI install/login, registry credential,
-> image pull, proxy boot, local HashiCorp Vault resolution, cert issuance,
-> and a real secret delivered through the proxy, confirmed by an
-> independently-computed sha256. The one path *not* covered by the main flow
-> is an MDM-managed Mac — see `guides/reference/local-mdm-macs.md` if that's you.
->
-> **Changed 2026-10-07:** the end-to-end test now calls the public Passport
-> demo API (`https://passport-demo.mock.postman.postman.dev`) instead of a local
-> echo server. **Verified 2026-10-07** on an MDM Mac (container CLI path, cached
-> proxy image): the proxy reached the demo API with no custom trust bundle, the
-> `/` endpoint matched, both `curl` and `passport request` returned
-> `"key":"sdfds**************","key_length":19`, and the reference kept working
-> after another proxy became the team default.
+> **Status:** verified end to end on 2026-10-05, and on an MDM Mac (container
+> CLI path) with the public demo API on 2026-10-07. Details:
+> `guides/reference/verification.md`.
 
 ## If an AI coding agent is running this guide for you
 
-Follow this guide literally and **do every step yourself**. `$REPO` below means the absolute path of this repository's root (the folder containing `AGENTS.md`); `scripts/` and `templates/` live there. Substitute the real path — each command runs in a fresh shell.
+The ground rules in `AGENTS.md` apply. This section adds only what is specific
+to the local setup.
 
-**Context isolation:** work from this repository's guide files only (this guide, `guides/reference/`,
-`scripts/` and `templates/`). Do not pull in context from elsewhere — no other repos, notes, memory or
-unrelated instructions. If something is missing here, ask the user instead of looking elsewhere.
+Follow this guide literally and **do every step yourself**. `$REPO` below means
+the absolute path of this repository's root (the folder containing
+`AGENTS.md`); `scripts/` and `templates/` live there. Substitute the real path:
+each command runs in a fresh shell.
 
-Only stop for things that truly need the
-human:
-
-- **Human-only inputs:** the registry key (have them save it in their own terminal with
-  `mkdir -p /tmp/pp-local && printf '%s' '<key>' > /tmp/pp-local/registry-key` so it never enters
-  chat; each agent command runs in a fresh shell, so read it from that file
-  instead of relying on `export`), the team ID, browser approvals, and the
-  Passport Cloud web UI steps (5.1–5.3). For 5.1 give them the exact values,
-  including the contents of `reference-public-key.pem`.
-- **Show login links on their own line**, as a full `https://` URL with the
-  confirmation code. If it expires, restart `login` and give a fresh one.
-- **MDM-managed Mac — detect it from the CLI, don't probe for it.** Switch to
-  the MDM guide (`guides/reference/local-mdm-macs.md`) as soon as any of these appears:
-  - `passport login` or `setup` output says `(from macOS managed plist)`;
-  - `setup` fails with `403 ... teamId "org_..." is not authorized for this
-    deployment` while the proxy logs no request;
-  - `passport whoami` says `Managed Passport credentials could not be verified`.
-  On such a Mac the CLI is pinned to the organisation's proxy and silently
-  ignores `--management-url`/`--proxy-url`, so run every CLI command through
-  the MDM guide's container (the host `passport` is only useful for
-  `auth status`). The host login that revealed it is harmless; log in again
-  inside the container, starting its callback forwarder (A.3) *before* asking
-  the user to approve — never ask them to paste a callback URL.
-- **Do 5.1–5.3 yourself via the API (step 5.4)** instead of asking the user
-  to click through the web UI, if they've told you to do it end to end.
-- **Check existing state first** (containers, network, keys, CLI version)
-  and reuse it; never regenerate `ref.pem` if one is registered.
-- **Never tear anything down (step 8)** until the user explicitly says so.
+- **The registry key is the only human-only input here.** Have the user save it
+  in their own terminal, so it never enters chat:
+  `mkdir -p /tmp/pp-local && printf '%s' '<key>' > /tmp/pp-local/registry-key`.
+  Read it from that file instead of relying on `export`.
+- **The browser approvals** (`passport login`) are the user's. Show the login
+  link on its own line, as a full `https://` URL with the confirmation code. If
+  it expires, restart `login` and give a fresh one.
+- **Read the team ID yourself** from `passport auth status` (4.3).
+- **Do 5.1–5.3 through the API (5.4)**, never by asking the user to click
+  through the web UI. The web UI steps are there for people following by hand.
+- **MDM-managed Mac:** step 1 checks for it. If a sign shows up later anyway
+  (`guides/reference/mdm-macs.md`, "How to tell"), switch then. On such a Mac
+  the CLI ignores `--management-url`/`--proxy-url`, so every CLI command runs
+  in that file's container.
+- **Check existing state first** (containers, network, keys, CLI version) and
+  reuse it; never regenerate `ref.pem` if one is registered.
 - **Right after the step 7 test passes, continue with `guides/after-setup.md`**
-  (mandatory). Send its short handoff first, then offer to add their own API.
+  (mandatory): its short handoff first, then the offer to add their own API.
+  Cleanup (step 8) waits until the user explicitly asks.
 
 ## What you need
 
@@ -103,6 +82,18 @@ msiexec /i $env:USERPROFILE\Downloads\passport.msi /quiet
 > current download link from the **Set up Passport** guide in your Passport
 > Cloud team (account menu → How-to → Set up Passport) instead.
 
+Check for an MDM-managed Mac first (read-only):
+
+```bash
+passport daemon status 2>&1 | grep -E 'routing source' || echo "(no host daemon running: no sign either way)"
+```
+
+> **On an MDM-managed Mac** (`routing source managed` above, or later `login`
+> auto-running `setup` against endpoints you didn't ask for), the CLI is pinned
+> to your organisation's proxy and ignores `--management-url`/`--proxy-url`.
+> Follow `guides/reference/mdm-macs.md` from here instead of logging in below:
+> it runs the CLI in a Linux container, and tells you which steps change.
+
 Then log in:
 
 ```bash
@@ -112,13 +103,6 @@ passport login
 This opens a browser to authenticate. Don't run `passport setup` yet — we
 point it at our *local* proxy in step 6, not the production one.
 
-> **On an MDM-managed Mac**, `passport login` will immediately auto-run
-> `setup` against your org's *managed* production endpoints (from the macOS
-> configuration profile), ignoring any `--management-url`/`--proxy-url` you
-> later pass to `setup` — with no flag to override. If you see `setup` log
-> endpoints you didn't ask for, that's this. Skip to the **MDM guide (`guides/reference/local-mdm-macs.md`)** at
-> the end of this guide instead of continuing linearly.
-
 ### 1.1 Confirm you have a team
 
 If `login` fails with something like `authenticated login session has no
@@ -126,10 +110,9 @@ organization`, your account isn't part of any Passport **team** yet — and
 nothing past this point works without one (no registry access, no team ID,
 no namespace, no grants).
 
-**Confirmed live 2026-10-05:** simply retrying `passport login` does **not**
-surface any team-selection or team-creation screen in the browser, even on a
-completely fresh account — the CLI's own error text ("select an organization
-during `passport login`") is misleading here, don't chase it looking for a
+Retrying `passport login` does **not** surface any team-selection or
+team-creation screen, even on a fresh account. The CLI's own hint ("select an
+organization during `passport login`") is misleading here; don't look for a
 prompt that won't appear.
 
 The actual fix: go to **[https://app.usepassport.ai/dashboard](https://app.usepassport.ai/dashboard)**
@@ -279,21 +262,14 @@ and add:
 - Path: `/`
 - Secret: label it `x-demo-api-key`, vault type **HashiCorp**, vault key `demo-api-key`
 
-> **Gotcha:** the proxy strips the port off the *request's* target host
-> before matching, but does **not** strip the port off the endpoint's stored
-> `host`. Register `host` with no port. Registering `example.com:443` will
-> silently fail every request with `not authorized for vault refs`, even though
-> `passport whoami` looks correct.
->
-> **Second gotcha:** a secret reference's vault config is encrypted
-> server-side under the public key of whichever proxy registration was
-> active when you created it (step 5.1's "Proxy public key"). If you ever
-> re-register the proxy with a *new* keypair (e.g. you regenerated
-> `ref.pem`), old secret references become undecryptable by the new proxy —
-> you'll see `failed to decrypt vault reference: <uuid>` with no further
-> detail. Fix: create a fresh namespace/secret-reference/endpoint/grant under
-> the currently-registered proxy, don't reuse ones from an earlier
-> registration.
+> **Two gotchas** (details in `guides/reference/concepts.md`):
+> - Register `host` **without a port**. `example.com:443` silently fails every
+>   request with `not authorized for vault refs`, even though `passport whoami`
+>   looks correct.
+> - A secret reference is encrypted for the team's **default** proxy when you
+>   create it. If another proxy is the default, or you later re-register with a
+>   new key, it fails with `failed to decrypt vault reference: <uuid>`. Make
+>   yours the default while you create references (5.4 does this).
 
 ### 5.3 Grant yourself access
 
@@ -304,9 +280,8 @@ created for your own user (as the account owner this is usually immediate).
 
 The web app is a front end for `https://api.usepassport.ai`; the CLI login
 session's WorkOS token authenticates the same calls. The token is read from
-`passportrc` and never printed. (On an MDM Mac, `~/.passport` on the host still
-has a valid session from `passport login`; run `passport auth status` first to
-refresh it.)
+`passportrc` and never printed. On an MDM Mac, use the container's login:
+`export PASSPORT_DIR=~/passport-cli-dl/.passport` first.
 
 ```bash
 cp "$REPO/scripts/passport-api.js" /tmp/pp-local/passport-api.js
@@ -316,25 +291,13 @@ cd /tmp/pp-local
 api GET /api/v2/tenant/config     # list existing proxy registrations
 ```
 
-> **Stale registration:** if an earlier run left a proxy registration with the
-> same endpoint but a different `publicKey` (e.g. `/tmp/pp-local` was wiped and
-> `ref.pem` regenerated), don't reuse it — secret references created under it
-> can't be decrypted by your current key. Register a fresh one below. Leave
-> the old one in place unless the user says to delete it.
-
-> **Why the default matters (verified in `passport-service`):** Passport
-> encrypts each new secret reference with the public key of the team's
-> **default** proxy registration. If there's no default, it uses an arbitrary
-> registration. Nothing in the request chooses the proxy. A reference created
-> while another proxy is the default can't be decrypted by yours (`failed to
-> decrypt vault reference`). The key is fixed when the reference is created, so
-> the safe pattern on a team that already has a default is:
-> 1. remember the current default;
-> 2. make your proxy the default;
-> 3. create your references;
-> 4. restore the previous default.
->
-> Your references keep working, and teammates aren't left on your test proxy.
+> **The default proxy and stale registrations:** the block below makes yours
+> the team default while it creates the reference, then restores the previous
+> default. If an earlier run left a registration with the same endpoint but a
+> different `publicKey`, don't reuse it: register a fresh one, and leave the
+> old one unless the user says to delete it. Why:
+> `guides/reference/concepts.md`, "Secret references are encrypted for the
+> team's default proxy".
 
 ```bash
 # 5.1 remember the team's current default, register ours AS the default (references are encrypted for it)
@@ -358,16 +321,15 @@ EP=$(api POST /api/v2/resource-endpoints "$(jq -nc --arg ns "$NS" --arg r "$REF"
 GR=$(api POST /api/v2/access-grants "$(jq -nc --arg u "$PP_USER" --arg ns "$NS" --arg e "$EP" '{userId:$u,namespaceId:$ns,endpointIds:[$e],reason:"passport proxy local e2e",validity:1}')" | jq -r '.body.data[0].id')
 # restore the previous default, if there was one (our reference stays decryptable)
 [ -n "$PREV_DEFAULT" ] && api PUT /api/v2/tenant/config/$PREV_DEFAULT '{"isDefault":true}' | jq -c .status
-printf 'PROXY_ID=%s\nPREV_DEFAULT=%s\nNS=%s\nRG=%s\nREF=%s\nEP=%s\nGR=%s\n' $PROXY_ID "$PREV_DEFAULT" $NS $RG $REF $EP $GR | tee ids.env
+# record only a complete set (a failed call gives an empty value or "null"; api also prints it as "api: … -> <status>")
+MISSING=; for v in PROXY_ID NS RG REF EP GR; do eval "x=\${$v:-}"; case "$x" in ''|null) MISSING="$MISSING $v";; esac; done
+if [ -z "$MISSING" ]; then printf 'PROXY_ID=%s\nPREV_DEFAULT=%s\nNS=%s\nRG=%s\nREF=%s\nEP=%s\nGR=%s\n' $PROXY_ID "$PREV_DEFAULT" $NS $RG $REF $EP $GR | tee ids.env
+else echo "INCOMPLETE, missing:$MISSING. Delete any IDs that were created, run 'passport auth status' (refreshes the token), re-run." >&2; fi
 ```
 
-> **The resource group is what makes it visible in the web UI.** The namespace
-> page lists *resource groups*, then the endpoints inside each one. An endpoint
-> created without `resourceGroupIds` works fine through the proxy but never
-> shows up in Passport Cloud. `source:"manual"` is what the web UI's **Manual**
-> flow uses. To fix an endpoint created earlier without a group, create the
-> group as above, then attach it (a `PUT` changes only the fields you send):
-> `api PUT /api/v2/resource-endpoints/$EP "$(jq -nc --arg g "$RG" '{resourceGroupIds:[$g]}')"`
+> **The resource group is what makes the endpoint visible in the web UI**
+> (`concepts.md`, "Endpoints", also shows how to attach one to an existing
+> endpoint).
 
 `ids.env` keeps the IDs for step 7 (`REF`) and for cleanup. Cleanup deletes, in
 order: `api DELETE /api/v2/access-grants/$GR`, `/api/v2/resource-endpoints/$EP`,
@@ -480,8 +442,9 @@ remove).
 
 ## Troubleshooting, MDM Macs, safety
 
-- Troubleshooting table: `guides/reference/local-troubleshooting.md`
-- MDM-managed Macs (run the CLI in a Linux container): `guides/reference/local-mdm-macs.md`
+- Troubleshooting (shared with the AWS setup): `guides/reference/troubleshooting.md`
+- MDM-managed Macs (run the CLI in a Linux container): `guides/reference/mdm-macs.md`
+- Why things work the way they do: `guides/reference/concepts.md`
 
 ## Safety notes
 

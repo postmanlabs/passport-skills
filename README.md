@@ -33,7 +33,7 @@ Secrets never go in chat, user-data or logs; every AWS change is confirmed first
 ```
 AGENTS.md                 entry point for any agent (CLAUDE.md, GEMINI.md, .cursor/, .github/ are one-line shims)
 guides/                   local-docker.md, aws-single-instance.md, after-setup.md (shared post-setup)
-                          + reference/ (troubleshooting, MDM Macs)
+                          + reference/ (shared: concepts, troubleshooting, MDM Macs, verification log)
 scripts/                  preflight.sh, env.sh, aws-resources.sh, passport-api.js
 templates/                user-data, CloudFront, operator-iam-policy.json
 .claude-plugin/, skills/  optional Claude Code plugin wrapper (same files, no duplication)

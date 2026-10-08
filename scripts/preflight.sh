@@ -92,5 +92,9 @@ fi
 LIM="$(aws ec2 describe-addresses --query 'length(Addresses)' --output text 2>/dev/null)"
 info "Elastic IPs in use in this region: ${LIM:-?} (default quota is 5)"
 echo "PREFLIGHT_NAME=${NAME:-}"
+# machine-readable values for guide step 2 (empty when not found)
+kv(){ case "$2" in "$3"*) echo "PREFLIGHT_$1=$2";; *) echo "PREFLIGHT_$1=";; esac; }
+kv VPC "$VPC" vpc-; kv SUBNET "$SUBNET" subnet-; kv AMI "$AMI" ami-; kv CF_PL "$PL" pl-
+echo "PREFLIGHT_CLIENT_CIDR=${MYIP:+$MYIP/32}"
 
 echo; [ "$FAIL" = 0 ] && echo "PREFLIGHT OK" || { echo "PREFLIGHT FOUND PROBLEMS (see ❌)"; exit 1; }
