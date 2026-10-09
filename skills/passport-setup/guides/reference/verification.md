@@ -21,12 +21,16 @@ something, and keep "Not verified yet" honest.
 | 2026-10-08 | MDM Mac, CLI `0.6.0-canary-261008-055959` | `passport daemon status` shows `routing source   managed`; `auth status` and `whoami` show no managed sign | Observed |
 | 2026-10-08 | Scripts only, with a mocked `aws` (zsh and bash) | `st` refuses empty, `None` and `null`; `onhost` returns the remote exit code and prints its stderr; a function failing under `set -e` skips zsh's `EXIT` trap, so AWS step 6 uses `\|\| die` instead | ✅ |
 | 2026-10-09 | Install, from a local checkout (sandboxed config dirs) | Claude Code 2.1.287: `claude plugin install passport@postman-passport-setup` put the whole skill folder in the plugin cache. Codex 0.162.1: `codex plugin add passport@postman-passport-setup` listed the skill as `passport:passport-setup`. `npx skills@1.7.2 add` copied all 16 files into `.agents/skills/passport-setup` | ✅ |
+| 2026-10-09 | Install, Cursor 3.23.12 loader code run outside the IDE (fake home) | The local-plugin loader loaded `~/.cursor/plugins/local/passport` as "Postman Passport" 0.2.0 with skill `passport-setup`; the marketplace parser read `.cursor-plugin/marketplace.json` as `postman-passport-setup` with plugin `passport`. Without `.cursor-plugin/` it falls back to `.claude-plugin/` | ✅ (code only) |
 
 ## Not verified yet
 
 - The README install commands against GitHub (the repo was private on
   2026-10-09), including Claude Code's `/plugin install passport --marketplace …`
   form, of which only the argument parser was read.
+- Cursor in the running IDE: the "Import from GitHub" marketplace flow (read
+  from the app code, not clicked through), `/passport-setup` showing up, and
+  `agent plugin marketplace add`.
 - **The AWS guide, end to end, in its current form.** This includes the
   2026-10-08 changes: the `run-instances` retry, the SSM wait check, the
   re-runnable step 6 with `die`, `PREFLIGHT_*` values, `cli`, and the

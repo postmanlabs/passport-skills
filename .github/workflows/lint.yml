@@ -14,14 +14,16 @@ jobs:
       - name: JSON validity
         run: |
           jq empty .claude-plugin/plugin.json .claude-plugin/marketplace.json \
-            .codex-plugin/plugin.json .agents/plugins/marketplace.json "$SKILL"/templates/*.json
+            .codex-plugin/plugin.json .agents/plugins/marketplace.json \
+            .cursor-plugin/plugin.json .cursor-plugin/marketplace.json "$SKILL"/templates/*.json
           jq empty "$SKILL"/templates/*.json.tmpl 2>/dev/null || true
       - name: Plugin manifests agree
         run: |
-          names=$(jq -r '.name' .claude-plugin/plugin.json .codex-plugin/plugin.json; \
-                  jq -r '.plugins[].name' .claude-plugin/marketplace.json .agents/plugins/marketplace.json)
+          names=$(jq -r '.name' .claude-plugin/plugin.json .codex-plugin/plugin.json .cursor-plugin/plugin.json; \
+                  jq -r '.plugins[].name' .claude-plugin/marketplace.json .agents/plugins/marketplace.json \
+                    .cursor-plugin/marketplace.json)
           [ "$(printf '%s\n' "$names" | sort -u)" = passport ] || { echo "plugin names differ: $names"; exit 1; }
-          [ "$(jq -r .version .claude-plugin/plugin.json)" = "$(jq -r .version .codex-plugin/plugin.json)" ] \
+          [ "$(jq -r .version .claude-plugin/plugin.json .codex-plugin/plugin.json .cursor-plugin/plugin.json | sort -u | wc -l)" -eq 1 ] \
             || { echo "plugin.json versions differ"; exit 1; }
       - name: Entry points exist
         run: test -f AGENTS.md -a -f "$SKILL/SKILL.md" -a -f "$SKILL/guides/local-docker.md" -a -f "$SKILL/guides/aws-single-instance.md"

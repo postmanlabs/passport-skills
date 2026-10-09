@@ -10,13 +10,13 @@ in its guides means the absolute path of `skills/passport-setup/`.
 
 ## Maintaining this repo (when you edit it)
 - **Everything the skill uses stays inside `skills/passport-setup/`.** `npx skills add` copies only that
-  folder, and the Claude Code and Codex plugins load the skill from it. A file outside it is missing after
+  folder, and the Claude Code, Codex and Cursor plugins load the skill from it. A file outside it is missing after
   an install. Don't use symlinks to reach outside it: `skills update` doesn't notice changes behind them,
   and Windows checkouts turn them into text files.
-- **Plugin names.** The plugin is `passport` in `.claude-plugin/marketplace.json`,
-  `.claude-plugin/plugin.json`, `.agents/plugins/marketplace.json` and `.codex-plugin/plugin.json`. The
-  README's install commands depend on that name. Keep `version` equal in both `plugin.json` files and bump
-  it when the skill changes, so plugin updates pick it up.
+- **Plugin names.** The plugin is `passport` in every manifest: `.claude-plugin/` (Claude Code),
+  `.cursor-plugin/` (Cursor), and `.agents/plugins/marketplace.json` + `.codex-plugin/plugin.json` (Codex).
+  The README's install commands depend on that name. Keep `version` equal in the three `plugin.json` files
+  and bump it when the skill changes, so plugin updates pick it up. CI checks both.
 - **One home per fact.** Rules: `skills/passport-setup/SKILL.md`. Setup steps: the two guides. The why:
   `concepts.md`. Symptoms and fixes: `troubleshooting.md`. What was tested and when: `verification.md`
   (not inline "verified on" notes). Link to the home instead of copying it.
