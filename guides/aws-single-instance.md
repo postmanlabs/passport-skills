@@ -24,10 +24,9 @@ trusted HTTPS address. By the end you will have:
 > For production, run the proxy with redundancy and a durable, managed secret
 > store. This guide doesn't cover that.
 
-> **Status: steps 1–8 have completed one full run on EC2, on an MDM Mac.**
-> Steps 9–10 and a Mac without MDM haven't. What has been verified, and where,
-> is in `guides/reference/verification.md`. Treat any step that fails as a bug
-> in this guide and fix the guide.
+> **Status: this version has not yet completed a full run on EC2.** What has
+> been verified, and where, is in `guides/reference/verification.md`. Treat any
+> step that fails as a bug in this guide and fix the guide.
 
 ## Where things live (read this once)
 
