@@ -12,9 +12,22 @@ trusted HTTPS address. By the end you will have:
   the request;
 - a worked example of adding your own API.
 
-> **Status: this version has not yet completed a full run on EC2.** What has
-> been verified, and where, is in `guides/reference/verification.md`. Treat any
-> step that fails as a bug in this guide and fix the guide.
+> **⚠️ This is a demo setup, not for production.** It's for evaluating Passport:
+> - **The proxy runs on one EC2 instance** (`t3.small`). There's no load
+>   balancer, no redundancy and no backups. If the instance is terminated or
+>   replaced, its keys are gone and every secret reference for it stops working.
+> - **The secrets live in a HashiCorp Vault on that same instance,** running in
+>   **dev mode, in memory**. Restarting the Vault container, or rebooting the
+>   instance, erases every stored secret. Store only test or low-risk
+>   credentials here.
+>
+> For production, run the proxy with redundancy and a durable, managed secret
+> store. This guide doesn't cover that.
+
+> **Status: steps 1–8 have completed one full run on EC2, on an MDM Mac.**
+> Steps 9–10 and a Mac without MDM haven't. What has been verified, and where,
+> is in `guides/reference/verification.md`. Treat any step that fails as a bug
+> in this guide and fix the guide.
 
 ## Where things live (read this once)
 
@@ -34,6 +47,13 @@ Nothing in this setup uses AWS Secrets Manager.
 
 The ground rules in `AGENTS.md` apply. This section adds only what is specific
 to AWS.
+
+**Before step 1, tell the user what this setup is**, in a few lines: it's a
+**demo, not for production**; it starts the Passport proxy on **one EC2
+instance**; and it starts a **HashiCorp Vault in dev mode on that instance**,
+where their secrets are stored **in memory** (lost on a Vault restart or a
+reboot). Use the warning at the top of this guide. Say it again before they
+store a real credential (`guides/after-setup.md`, part 2).
 
 Follow this guide literally and **do every step yourself**, except the steps
 marked **[you]**, which need the human. `$REPO` means the absolute path of this
@@ -208,10 +228,16 @@ Check it with `aws sts get-caller-identity --profile passport`.
 that runs this guide:
 - **What it allows:** every action the commands below use, nothing else.
 - **Deletes:** only on resources tagged `project=passport`.
+- **SSM sessions and Run Command:** only on instances tagged `project=passport`,
+  not every instance in the account.
+- **Tags:** only while creating a resource, so the identity can't tag an existing
+  resource `project=passport` to get around the two limits above.
 - **IAM actions:** only on roles and instance profiles named `passport-proxy-*`.
 
-An administrator attaches it to the permission set, role or user. For a sandbox
-account, `PowerUserAccess` plus the policy's IAM statements also works.
+It's over the 2,048-character limit for an inline user policy, so create it as
+a managed policy. An administrator attaches it to the permission set, role or
+user. For a sandbox account, `PowerUserAccess` plus the policy's IAM statements
+also works.
 
 If an action is still denied, the guide stops and names the action. Fix the
 policy file in this repo, not just the account.

@@ -197,7 +197,8 @@ as they are.
 
 **1. [you] Store the secret value** with the hidden-prompt command for your
 setup (part 0 table). It never appears in chat, shell history or a process
-list. Wait for "done".
+list. Wait for "done". First remind them that this is a demo: the Vault is
+dev mode and in memory, so use a test or low-risk credential.
 
 **2. The agent creates the Passport objects itself**, without asking. Fill in
 the first line:
