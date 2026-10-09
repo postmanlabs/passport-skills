@@ -19,12 +19,12 @@ comfort with a terminal and Docker.
 
 ## If an AI coding agent is running this guide for you
 
-The ground rules in `AGENTS.md` apply. This section adds only what is specific
+The ground rules in `SKILL.md` apply. This section adds only what is specific
 to the local setup.
 
-Follow this guide literally and **do every step yourself**. `$REPO` below means
-the absolute path of this repository's root (the folder containing
-`AGENTS.md`); `scripts/` and `templates/` live there. Substitute the real path:
+Follow this guide literally and **do every step yourself**. `$SKILL_DIR` below means
+the absolute path of this skill's folder (the folder containing
+`SKILL.md`); `scripts/` and `templates/` live there. Substitute the real path:
 each command runs in a fresh shell.
 
 - **The registry key is the only human-only input here.** Have the user save it
@@ -284,7 +284,7 @@ session's WorkOS token authenticates the same calls. The token is read from
 `export PASSPORT_DIR=~/passport-cli-dl/.passport` first.
 
 ```bash
-cp "$REPO/scripts/passport-api.js" /tmp/pp-local/passport-api.js
+cp "$SKILL_DIR/scripts/passport-api.js" /tmp/pp-local/passport-api.js
 api() { node /tmp/pp-local/passport-api.js "$@"; }
 cd /tmp/pp-local
 

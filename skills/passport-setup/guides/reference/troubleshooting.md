@@ -53,7 +53,7 @@
 | `UnauthorizedOperation` on `run-instances` / `iam:… AccessDenied` | Compare your policy with `templates/operator-iam-policy.json`. If the guide uses an action the file lacks, fix the file. |
 | `run-instances failed: … iamInstanceProfile.name is invalid` | IAM propagation took longer than A5's one-minute retry. Wait a little and re-run only A5. |
 | `Unknown options: --profile x --region y` | zsh doesn't split a variable into words. Export `AWS_PROFILE`/`AWS_REGION` instead (`scripts/env.sh` does this). |
-| `$PROXY_HOST` is your Mac's name / an `ec2-…` name you didn't expect | The manifest wasn't loaded. Start the block with `. "$REPO/scripts/env.sh"`. In zsh, `$HOST` is built in, which is why the guide uses `PROXY_HOST`. |
+| `$PROXY_HOST` is your Mac's name / an `ec2-…` name you didn't expect | The manifest wasn't loaded. Start the block with `. "$SKILL_DIR/scripts/env.sh"`. In zsh, `$HOST` is built in, which is why the guide uses `PROXY_HOST`. |
 | A block stops with your tool's own timeout during `aws cloudfront wait …` or `aws ec2 wait …` | Not an AWS failure: those waits can take 3–15 minutes. Re-run only the wait, with a longer timeout or in the background. |
 
 ## AWS: instance and proxy

@@ -3,25 +3,39 @@ on: [push, pull_request]
 jobs:
   lint:
     runs-on: ubuntu-latest
+    env:
+      SKILL: skills/passport-setup
     steps:
       - uses: actions/checkout@v4
       - name: shellcheck
-        run: shellcheck --severity=warning scripts/*.sh
+        run: shellcheck --severity=warning "$SKILL"/scripts/*.sh
       - name: JS syntax
-        run: for f in scripts/*.js templates/*.js; do node --check "$f"; done
+        run: for f in "$SKILL"/scripts/*.js "$SKILL"/templates/*.js; do node --check "$f"; done
       - name: JSON validity
         run: |
-          jq empty .claude-plugin/plugin.json .claude-plugin/marketplace.json
-          jq empty templates/*.json.tmpl 2>/dev/null || true
+          jq empty .claude-plugin/plugin.json .claude-plugin/marketplace.json \
+            .codex-plugin/plugin.json .agents/plugins/marketplace.json "$SKILL"/templates/*.json
+          jq empty "$SKILL"/templates/*.json.tmpl 2>/dev/null || true
+      - name: Plugin manifests agree
+        run: |
+          names=$(jq -r '.name' .claude-plugin/plugin.json .codex-plugin/plugin.json; \
+                  jq -r '.plugins[].name' .claude-plugin/marketplace.json .agents/plugins/marketplace.json)
+          [ "$(printf '%s\n' "$names" | sort -u)" = passport ] || { echo "plugin names differ: $names"; exit 1; }
+          [ "$(jq -r .version .claude-plugin/plugin.json)" = "$(jq -r .version .codex-plugin/plugin.json)" ] \
+            || { echo "plugin.json versions differ"; exit 1; }
       - name: Entry points exist
-        run: test -f AGENTS.md -a -f guides/local-docker.md -a -f guides/aws-single-instance.md
-      - name: Paths mentioned in markdown exist
+        run: test -f AGENTS.md -a -f "$SKILL/SKILL.md" -a -f "$SKILL/guides/local-docker.md" -a -f "$SKILL/guides/aws-single-instance.md"
+      - name: Paths mentioned in markdown exist (relative to the skill folder)
         run: |
           missing=0
           for f in $(grep -rhoE '(guides|scripts|templates)/[A-Za-z0-9_./-]+\.(md|sh|js|json|tmpl)' --include='*.md' . | sort -u); do
-            [ -e "$f" ] || { echo "missing: $f"; missing=1; }
+            [ -e "$SKILL/$f" ] || { echo "missing: $f"; missing=1; }
           done
           exit $missing
+      - name: Skill is self-contained (no symlinks)
+        run: |
+          links=$(find "$SKILL" -type l)
+          [ -z "$links" ] || { echo "symlinks in the skill folder: $links"; exit 1; }
       - name: SKILL.md frontmatter
         run: |
           for f in skills/*/SKILL.md; do

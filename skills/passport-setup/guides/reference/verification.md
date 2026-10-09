@@ -20,9 +20,13 @@ something, and keep "Not verified yet" honest.
 | 2026-10-07 | Local, MDM | `mdm-macs.md` A.5 (local): the daemon block in a clean shell returned `"key_length":19` (without the `export` lines, the pointer arrived unchanged); after the first 5-minute certificate expired, the daemon minted a new one on the next request | ✅ |
 | 2026-10-08 | MDM Mac, CLI `0.6.0-canary-261008-055959` | `passport daemon status` shows `routing source   managed`; `auth status` and `whoami` show no managed sign | Observed |
 | 2026-10-08 | Scripts only, with a mocked `aws` (zsh and bash) | `st` refuses empty, `None` and `null`; `onhost` returns the remote exit code and prints its stderr; a function failing under `set -e` skips zsh's `EXIT` trap, so AWS step 6 uses `\|\| die` instead | ✅ |
+| 2026-10-09 | Install, from a local checkout (sandboxed config dirs) | Claude Code 2.1.287: `claude plugin install passport@postman-passport-setup` put the whole skill folder in the plugin cache. Codex 0.162.1: `codex plugin add passport@postman-passport-setup` listed the skill as `passport:passport-setup`. `npx skills@1.7.2 add` copied all 16 files into `.agents/skills/passport-setup` | ✅ |
 
 ## Not verified yet
 
+- The README install commands against GitHub (the repo was private on
+  2026-10-09), including Claude Code's `/plugin install passport --marketplace …`
+  form, of which only the argument parser was read.
 - **The AWS guide, end to end, in its current form.** This includes the
   2026-10-08 changes: the `run-instances` retry, the SSM wait check, the
   re-runnable step 6 with `die`, `PREFLIGHT_*` values, `cli`, and the
