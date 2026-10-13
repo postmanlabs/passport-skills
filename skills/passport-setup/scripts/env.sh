@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # Source at the top of every command block of guides/aws-single-instance.md (each agent command runs in a fresh shell):
-#   REPO=<absolute repo path>; . "$REPO/scripts/env.sh"
+#   SKILL_DIR=<absolute skill folder path>; . "$SKILL_DIR/scripts/env.sh"
 # Loads the deployment manifest (/tmp/pp-aws/state.env) and defines: st (record), api (Passport Cloud),
 # cli (the Passport CLI, host or MDM container), onhost (SSM Run Command).
 W=/tmp/pp-aws
@@ -20,7 +20,7 @@ st() {
 }
 
 # api METHOD PATH [JSON|@file] — Passport Cloud API with the CLI login token (never printed)
-api() { node "$REPO/scripts/passport-api.js" "$@"; }
+api() { node "$SKILL_DIR/scripts/passport-api.js" "$@"; }
 
 # cli ARGS — the Passport CLI. With MDM=1 recorded (guides/reference/mdm-macs.md) it runs in the
 # pp-cli-linux container, because a managed Mac's own CLI ignores --management-url/--proxy-url.

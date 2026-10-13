@@ -27,7 +27,7 @@ PROXY=https://localhost:8443; MGMT=http://localhost:8081; DESTCA=/tmp/pp-local/p
 **AWS:**
 
 ```bash
-REPO=<repo>; . "$REPO/scripts/env.sh"; cd /tmp/pp-aws; W=/tmp/pp-aws
+SKILL_DIR=<skill dir>; . "$SKILL_DIR/scripts/env.sh"; cd /tmp/pp-aws; W=/tmp/pp-aws
 PROXY=https://$PROXY_HOST:8443; MGMT=https://$CF_DOMAIN; DESTCA=/tmp/pp-aws/proxy-ca.pem; D=$PASSPORT_DIR
 ```
 

@@ -3,25 +3,48 @@ on: [push, pull_request]
 jobs:
   lint:
     runs-on: ubuntu-latest
+    env:
+      SKILL: skills/passport-setup
     steps:
       - uses: actions/checkout@v4
       - name: shellcheck
-        run: shellcheck --severity=warning scripts/*.sh
+        run: shellcheck --severity=warning "$SKILL"/scripts/*.sh
       - name: JS syntax
-        run: for f in scripts/*.js templates/*.js; do node --check "$f"; done
+        run: for f in "$SKILL"/scripts/*.js "$SKILL"/templates/*.js; do node --check "$f"; done
       - name: JSON validity
         run: |
-          jq empty .claude-plugin/plugin.json .claude-plugin/marketplace.json
-          jq empty templates/*.json.tmpl 2>/dev/null || true
+          jq empty .claude-plugin/plugin.json .claude-plugin/marketplace.json \
+            .codex-plugin/plugin.json .agents/plugins/marketplace.json \
+            .cursor-plugin/plugin.json .cursor-plugin/marketplace.json "$SKILL"/templates/*.json
+          jq empty "$SKILL"/templates/*.json.tmpl 2>/dev/null || true
+      - name: Plugin manifests agree
+        run: |
+          fail() { echo "$1"; exit 1; }
+          for f in .claude-plugin/plugin.json .codex-plugin/plugin.json .cursor-plugin/plugin.json; do
+            [ "$(jq -r .name "$f")" = passport ] || fail "$f: name must be passport"
+          done
+          for f in .claude-plugin/marketplace.json .agents/plugins/marketplace.json .cursor-plugin/marketplace.json; do
+            [ "$(jq -r .name "$f")" = passport-proxy-setup ] || fail "$f: marketplace name must be passport-proxy-setup"
+            jq -e '[.plugins[].name] | index("passport")' "$f" >/dev/null || fail "$f: no passport entry"
+          done
+          # The Claude marketplace also keeps the old plugin name, so old install commands still work.
+          jq -e '[.plugins[].name] | sort == ["passport","passport-proxy-setup"]' .claude-plugin/marketplace.json >/dev/null \
+            || fail ".claude-plugin/marketplace.json must list exactly passport and passport-proxy-setup"
+          [ "$(jq -r .version .claude-plugin/plugin.json .codex-plugin/plugin.json .cursor-plugin/plugin.json | sort -u | wc -l)" -eq 1 ] \
+            || fail "plugin.json versions differ"
       - name: Entry points exist
-        run: test -f AGENTS.md -a -f guides/local-docker.md -a -f guides/aws-single-instance.md
-      - name: Paths mentioned in markdown exist
+        run: test -f AGENTS.md -a -f "$SKILL/SKILL.md" -a -f "$SKILL/guides/local-docker.md" -a -f "$SKILL/guides/aws-single-instance.md"
+      - name: Paths mentioned in markdown exist (relative to the skill folder)
         run: |
           missing=0
           for f in $(grep -rhoE '(guides|scripts|templates)/[A-Za-z0-9_./-]+\.(md|sh|js|json|tmpl)' --include='*.md' . | sort -u); do
-            [ -e "$f" ] || { echo "missing: $f"; missing=1; }
+            [ -e "$SKILL/$f" ] || { echo "missing: $f"; missing=1; }
           done
           exit $missing
+      - name: Skill is self-contained (no symlinks)
+        run: |
+          links=$(find "$SKILL" -type l)
+          [ -z "$links" ] || { echo "symlinks in the skill folder: $links"; exit 1; }
       - name: SKILL.md frontmatter
         run: |
           for f in skills/*/SKILL.md; do

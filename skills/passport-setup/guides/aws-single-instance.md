@@ -35,7 +35,7 @@ trusted HTTPS address. By the end you will have:
 | **Proxy bootstrap keys**: `ca.pem` signs client certificates; `ref.pem` decrypts secret references | On the instance's disk, `/opt/passport/keys/`, generated at first boot | Survive container restarts and reboots. **Lost if the instance is terminated or replaced**, and every secret reference registered for this proxy then stops working |
 | **Reference public key** | `/opt/passport/reference-public-key.pem`, registered with Passport Cloud | The only key material that leaves the instance |
 | **API credentials** (the secrets your requests use) | The **HashiCorp Vault** container on the instance, at `secret/<vault-key>` | **The Vault runs in dev mode, in memory. Restarting its container, or rebooting, erases every API credential.** Re-store them with `passport-vault-put` |
-| **Registry key** (pulls the proxy image) | You type it into `sudo docker login` in your own terminal; it's logged out right after the pull | Never in user-data, SSM parameters, chat, or this repo |
+| **Registry key** (pulls the proxy image) | You type it into `sudo docker login` in your own terminal; it's logged out right after the pull | Never in user-data, SSM parameters, chat, or a git repo |
 | **Your client certificate** | Your machine, `~/.passport/` (`cert.pem`, `key.pem`, `ca.pem`) | Short-lived; renewed by the daemon (`guides/reference/concepts.md`, "Client certificates") |
 
 Nothing in this setup uses AWS Secrets Manager.
@@ -44,7 +44,7 @@ Nothing in this setup uses AWS Secrets Manager.
 
 ## Rules for an AI coding agent running this guide
 
-The ground rules in `AGENTS.md` apply. This section adds only what is specific
+The ground rules in `SKILL.md` apply. This section adds only what is specific
 to AWS.
 
 **Before step 1, tell the user what this setup is**, in a few lines: it's a
@@ -55,11 +55,11 @@ reboot). Use the warning at the top of this guide. Say it again before they
 store a real credential (`guides/after-setup.md`, part 2).
 
 Follow this guide literally and **do every step yourself**, except the steps
-marked **[you]**, which need the human. `$REPO` means the absolute path of this
-repository (the folder containing `AGENTS.md`). Start every command block with:
+marked **[you]**, which need the human. `$SKILL_DIR` means the absolute path of this
+skill's folder (the folder containing `SKILL.md`). Start every command block with:
 
 ```bash
-REPO=<absolute path of this repo>; . "$REPO/scripts/env.sh"
+SKILL_DIR=<absolute path of this skill folder>; . "$SKILL_DIR/scripts/env.sh"
 ```
 
 `scripts/env.sh` loads the manifest `/tmp/pp-aws/state.env` and defines four
@@ -89,10 +89,10 @@ Ask once per block. Then:
 - **Never create anything outside the approved table.**
 - **Never delete anything unconfirmed.** It must be in `state.env` or
   `resources.env`, **and** be confirmed by
-  `bash "$REPO/scripts/aws-resources.sh" delete /tmp/pp-aws/state.env`. That
+  `bash "$SKILL_DIR/scripts/aws-resources.sh" delete /tmp/pp-aws/state.env`. That
   script prints `STOP` if a recorded ID isn't tagged as ours. If it does, delete
   nothing and ask.
-- **Passport Cloud API and CLI calls need no approval block** (`AGENTS.md`):
+- **Passport Cloud API and CLI calls need no approval block** (`SKILL.md`):
   run them, record the IDs with `st`, and say what you created. Step 6 makes
   your proxy the team default only while it creates the reference, then
   restores the previous default, even if the block fails partway. Tell the user
@@ -122,7 +122,7 @@ that file's "Found MDM after AWS step 3" if the instance already exists.
 ## 1. Discover (read-only, no questions yet)
 
 ```bash
-mkdir -p /tmp/pp-aws; REPO=<repo>; . "$REPO/scripts/env.sh"
+mkdir -p /tmp/pp-aws; SKILL_DIR=<skill dir>; . "$SKILL_DIR/scripts/env.sh"
 echo "--- tools"; for t in aws session-manager-plugin passport docker node jq openssl; do printf '%-24s %s\n' "$t" "$(command -v $t >/dev/null && ($t --version 2>/dev/null | head -1) || echo MISSING)"; done
 echo "--- aws profiles"; for p in $(aws configure list-profiles 2>/dev/null); do printf '%-20s region=%-12s %s\n' "$p" "$(aws configure get region --profile $p)" "$(aws sts get-caller-identity --profile $p --query Arn --output text 2>&1 | tail -1 | cut -c1-90)"; done
 echo "--- passport"; passport --version 2>/dev/null; passport auth status 2>&1 | grep -E 'org|expires|not logged'
@@ -134,7 +134,7 @@ From this output, decide without asking where you can:
 - **Profile:** the profile with a working session. If more than one works, ask which.
 - **Region:** that profile's configured region.
 - **Existing deployment:** if `/tmp/pp-aws/state.env` has a `NAME`, run
-  `bash "$REPO/scripts/aws-resources.sh" show /tmp/pp-aws/state.env` and resume
+  `bash "$SKILL_DIR/scripts/aws-resources.sh" show /tmp/pp-aws/state.env` and resume
   from there instead of creating a new one.
 - **MDM-managed Mac:** `routing source managed` above, or any other sign in
   `guides/reference/mdm-macs.md` ("How to tell"). Decide this now, before
@@ -238,16 +238,16 @@ a managed policy. An administrator attaches it to the permission set, role or
 user. For a sandbox account, `PowerUserAccess` plus the policy's IAM statements
 also works.
 
-If an action is still denied, the guide stops and names the action. Fix the
-policy file in this repo, not just the account.
+If an action is still denied, the guide stops and names the action. Fix
+`templates/operator-iam-policy.json`, not just the account.
 
 ---
 
 ## 2. Preflight (read-only) and the plan
 
 ```bash
-REPO=<repo>; export AWS_PROFILE=<profile> AWS_REGION=<region>; . "$REPO/scripts/env.sh"
-bash "$REPO/scripts/preflight.sh" | tee /tmp/pp-aws/preflight.txt
+SKILL_DIR=<skill dir>; export AWS_PROFILE=<profile> AWS_REGION=<region>; . "$SKILL_DIR/scripts/env.sh"
+bash "$SKILL_DIR/scripts/preflight.sh" | tee /tmp/pp-aws/preflight.txt
 ```
 
 It checks:
@@ -267,7 +267,7 @@ machine-readable lines (`PREFLIGHT_NAME=`, `PREFLIGHT_VPC=`,
 Fix every ❌ before going on. Then record the inputs:
 
 ```bash
-REPO=<repo>; export AWS_PROFILE=<profile> AWS_REGION=<region>; . "$REPO/scripts/env.sh"
+SKILL_DIR=<skill dir>; export AWS_PROFILE=<profile> AWS_REGION=<region>; . "$SKILL_DIR/scripts/env.sh"
 pf() { sed -n "s/^PREFLIGHT_$1=//p" /tmp/pp-aws/preflight.txt; }
 st AWS_PROFILE "$AWS_PROFILE"; st AWS_REGION "$AWS_REGION"
 st NAME "$(pf NAME)"; st VPC "$(pf VPC)"; st SUBNET "$(pf SUBNET)"; st AMI "$(pf AMI)"; st CF_PL "$(pf CF_PL)"; st CLIENT_CIDR "$(pf CLIENT_CIDR)"
@@ -297,7 +297,7 @@ Everything is in account `<ACCOUNT>`, region `<AWS_REGION>`, tagged
 `project=passport`. Nothing else is created.
 
 ```bash
-REPO=<repo>; . "$REPO/scripts/env.sh"; set -e; cd /tmp/pp-aws
+SKILL_DIR=<skill dir>; . "$SKILL_DIR/scripts/env.sh"; set -e; cd /tmp/pp-aws
 N=passport-proxy-$NAME; TAGS="{Key=Name,Value=$N},{Key=project,Value=passport}"
 
 # A1 security group
@@ -324,15 +324,15 @@ aws iam add-role-to-instance-profile --instance-profile-name $N --role-name $N
 
 # A4 CloudFront function + distribution (its ~3-minute deploy overlaps the boot)
 ETAG=$(aws cloudfront create-function --name $N-404 --function-config Comment=passport-404,Runtime=cloudfront-js-2.0 \
-  --function-code "fileb://$REPO/templates/cloudfront-404.js" --query ETag --output text); st CF_FUNCTION $N-404
+  --function-code "fileb://$SKILL_DIR/templates/cloudfront-404.js" --query ETag --output text); st CF_FUNCTION $N-404
 FN=$(aws cloudfront publish-function --name $N-404 --if-match $ETAG --query 'FunctionSummary.FunctionMetadata.FunctionARN' --output text)
 sed -e "s|__CALLER_REF__|$N-$(date +%s)|" -e "s|__NAME__|$NAME|" -e "s|__HOSTNAME__|$PROXY_HOST|" -e "s|__FN_ARN__|$FN|" \
-  "$REPO/templates/cloudfront-dist.json.tmpl" > cf-dist.json
+  "$SKILL_DIR/templates/cloudfront-dist.json.tmpl" > cf-dist.json
 read -r D DOM < <(aws cloudfront create-distribution --distribution-config file://cf-dist.json --query 'Distribution.[Id,DomainName]' --output text)
 st CF_DIST "$D"; st CF_DOMAIN "$DOM"
 
 # A5 instance. User-data holds NO secrets, only the team ID and hostnames (checked below).
-sed -e "s|__ORG__|$ORG|" -e "s|__SANS__|$PROXY_HOST,$EIP|" "$REPO/templates/user-data.tmpl" > user-data.sh
+sed -e "s|__ORG__|$ORG|" -e "s|__SANS__|$PROXY_HOST,$EIP|" "$SKILL_DIR/templates/user-data.tmpl" > user-data.sh
 ! grep -qE 'sk_|PRIVATE KEY|VAULT_TOKEN=[0-9a-f]' user-data.sh || { echo "SECRET IN USER-DATA — STOP"; exit 1; }
 # A new instance profile takes a few seconds to reach EC2. Retry only that error (no instance is created
 # when it happens), for up to a minute; stop on any other error.
@@ -348,7 +348,7 @@ done
 case "$OUT" in i-*) st INSTANCE "$OUT";; *) echo "run-instances failed: $OUT"; exit 1;; esac
 aws ec2 wait instance-running --instance-ids $INSTANCE
 aws ec2 associate-address --instance-id $INSTANCE --allocation-id $ALLOC >/dev/null
-bash "$REPO/scripts/aws-resources.sh" show /tmp/pp-aws/state.env
+bash "$SKILL_DIR/scripts/aws-resources.sh" show /tmp/pp-aws/state.env
 ```
 
 **If a command fails halfway:**
@@ -369,7 +369,7 @@ First boot installs Docker and starts Vault, which takes about 2 minutes. The
 proxy isn't running yet, because it needs your registry login (step 5).
 
 ```bash
-REPO=<repo>; . "$REPO/scripts/env.sh"
+SKILL_DIR=<skill dir>; . "$SKILL_DIR/scripts/env.sh"
 ONLINE=
 for i in $(seq 1 30); do
   [ "$(aws ssm describe-instance-information --filters Key=InstanceIds,Values=$INSTANCE \
@@ -384,7 +384,7 @@ Then fetch the reference **public** key and record its fingerprint. It's public,
 so it's safe to pass through SSM output:
 
 ```bash
-REPO=<repo>; . "$REPO/scripts/env.sh"
+SKILL_DIR=<skill dir>; . "$SKILL_DIR/scripts/env.sh"
 onhost 'cat /opt/passport/reference-public-key.pem' > /tmp/pp-aws/reference-public-key.pem
 grep -q 'BEGIN PUBLIC KEY' /tmp/pp-aws/reference-public-key.pem && \
   st REF_KEY_SHA256 "$(openssl pkey -pubin -in /tmp/pp-aws/reference-public-key.pem -outform DER | openssl dgst -sha256 | awk '{print $NF}')"
@@ -416,7 +416,7 @@ exit
 When the user says done, verify it yourself:
 
 ```bash
-REPO=<repo>; . "$REPO/scripts/env.sh"
+SKILL_DIR=<skill dir>; . "$SKILL_DIR/scripts/env.sh"
 onhost 'docker ps --format "{{.Names}} {{.Status}}"; curl -s -o /dev/null -w "readyz=%{http_code}\n" http://localhost:8081/readyz'
 aws cloudfront wait distribution-deployed --id $CF_DIST       # usually done by now; can take minutes ("Long waits")
 curl -s -m 10 -o /tmp/pp-aws/proxy-ca.pem -w "ca.pem via CloudFront=%{http_code}\n" https://$CF_DOMAIN/ca.pem
@@ -445,7 +445,7 @@ created, using this table with the real IDs:
 | WRITE | Vault entry on the instance | `secret/demo-api-key` = the demo API's **known sample key** `sdfdsfdsfsdfdfsdfds` |
 
 ```bash
-REPO=<repo>; . "$REPO/scripts/env.sh"; cd /tmp/pp-aws
+SKILL_DIR=<skill dir>; . "$SKILL_DIR/scripts/env.sh"; cd /tmp/pp-aws
 # No `set -e` here: each step ends in `|| die`, which hands the team's default back before stopping.
 # (A trap can't do this reliably: zsh skips EXIT traps when `set -e` fires inside a function.)
 restore_default() {
@@ -500,7 +500,7 @@ grep -E '^(PROXY_ID|NS|RG|REF|EP|GR|PREV_DEFAULT)=' state.env
 ## 7. Issue your certificate, trust the CA, start the daemon
 
 ```bash
-REPO=<repo>; . "$REPO/scripts/env.sh"
+SKILL_DIR=<skill dir>; . "$SKILL_DIR/scripts/env.sh"
 cli setup --management-url https://$CF_DOMAIN --proxy-url https://$PROXY_HOST:8443 ${MDM:+--no-daemon}; echo "setup exit=$?"
 ```
 
@@ -539,7 +539,7 @@ openssl x509 -in ~/.passport/ca.pem -noout -fingerprint -sha256                 
 ### 8.1 Your identity
 
 ```bash
-REPO=<repo>; . "$REPO/scripts/env.sh"
+SKILL_DIR=<skill dir>; . "$SKILL_DIR/scripts/env.sh"
 cli whoami
 ```
 
@@ -563,7 +563,7 @@ received, so the response shows whether Passport injected the real key:
 does: `concepts.md`, "Two ways to send a request"):
 
 ```bash
-REPO=<repo>; . "$REPO/scripts/env.sh"; D=$PASSPORT_DIR
+SKILL_DIR=<skill dir>; . "$SKILL_DIR/scripts/env.sh"; D=$PASSPORT_DIR
 R=$(curl -sS --proxy https://$PROXY_HOST:8443 \
   --proxy-cacert $D/ca.pem --proxy-cert $D/cert.pem --proxy-key $D/key.pem \
   --cacert /tmp/pp-aws/proxy-ca.pem \
@@ -633,8 +633,8 @@ setup. Use its *AWS* load block. It covers:
 ## 10. Cleanup (only when the user explicitly asks): approval block D
 
 ```bash
-REPO=<repo>; . "$REPO/scripts/env.sh"
-bash "$REPO/scripts/aws-resources.sh" delete /tmp/pp-aws/state.env
+SKILL_DIR=<skill dir>; . "$SKILL_DIR/scripts/env.sh"
+bash "$SKILL_DIR/scripts/aws-resources.sh" delete /tmp/pp-aws/state.env
 ```
 
 Show the user the printed plan word for word. It lists every ID in order, and
@@ -642,7 +642,7 @@ checks that each one is tagged as ours. If it prints `STOP`, delete nothing and
 ask. After a yes, run exactly that plan:
 
 ```bash
-REPO=<repo>; . "$REPO/scripts/env.sh"
+SKILL_DIR=<skill dir>; . "$SKILL_DIR/scripts/env.sh"
 [ -n "${MDM:-}" ] || passport daemon stop          # MDM Mac: its daemon container goes with the local side, below
 # APIs added via guides/after-setup.md part 2 first
 [ -s /tmp/pp-aws/resources.env ] && while read -r m u rest; do
@@ -673,7 +673,7 @@ if [ -n "${SG:-}" ]; then for i in 1 2 3 4 5 6; do   # the instance's network in
   E=$(aws ec2 delete-security-group --group-id $SG 2>&1) && { echo "deleted $SG"; break; }
   case "$E" in *DependencyViolation*) [ $i = 6 ] && echo "$SG still in use: re-run this line in a minute" || sleep 10;; *) echo "$SG: $E"; break;; esac
 done; fi
-bash "$REPO/scripts/aws-resources.sh" show /tmp/pp-aws/state.env      # every AWS row should now say NOT FOUND
+bash "$SKILL_DIR/scripts/aws-resources.sh" show /tmp/pp-aws/state.env      # every AWS row should now say NOT FOUND
 ```
 
 - **Report the result per row.** One failure must not hide the others.

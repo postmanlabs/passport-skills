@@ -193,7 +193,7 @@ EOF
 **AWS:** the proxy is on EC2, so the daemon runs on a normal bridge network.
 
 ```bash
-REPO=<repo>; . "$REPO/scripts/env.sh"
+SKILL_DIR=<skill dir>; . "$SKILL_DIR/scripts/env.sh"
 docker run -d --name pp-daemon --restart unless-stopped -p 127.0.0.1:10144:10145 -v ~/passport-cli-dl:/cli:ro -w /cli node:20 \
   sh -c "umask 077; mkdir -p /root/.passport && cp /cli/.passport/passportrc /root/.passport/passportrc; export PASSPORT_DIR=/root/.passport; ./passport setup --management-url https://$CF_DOMAIN --proxy-url https://$PROXY_HOST:8443 --no-daemon > /root/setup.log 2>&1; node /cli/daemon-fwd.js & exec ./passport daemon start --foreground"
 docker exec -e PASSPORT_DIR=/root/.passport pp-daemon ./passport daemon status     # upstream <PROXY_HOST>:8443 (reachable)

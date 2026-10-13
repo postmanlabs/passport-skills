@@ -1,7 +1,7 @@
 # Passport concepts and rules (shared by both setups)
 
 The guides link here for the *why*. The rules an agent must follow are in
-`AGENTS.md`; symptoms and fixes are in `troubleshooting.md`; what has been
+`SKILL.md`; symptoms and fixes are in `troubleshooting.md`; what has been
 tested, and when, is in `verification.md`.
 
 ## How a request is allowed
