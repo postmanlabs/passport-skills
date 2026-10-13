@@ -1,5 +1,5 @@
 {
-  "name": "passport-proxy-setup",
+  "name": "passport-skills",
   "owner": { "name": "postmanlabs" },
   "metadata": {
     "description": "Set up and verify a Postman Passport proxy (local Docker or a single AWS EC2 instance)."
@@ -9,11 +9,6 @@
       "name": "passport",
       "source": "./",
       "description": "Set up and verify a Postman Passport proxy (local Docker, AWS single instance)."
-    },
-    {
-      "name": "passport-proxy-setup",
-      "source": "./",
-      "description": "Old name of the passport plugin, kept so existing install commands work. Install passport instead."
     }
   ]
 }
