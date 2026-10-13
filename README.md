@@ -1,4 +1,4 @@
-# postman-passport-setup
+# passport-skills
 
 > **Note:** the AWS guide creates billable resources.
 
@@ -11,20 +11,20 @@ the matching guide.
 
 | Agent | Install |
 |---|---|
-| Claude Code | `/plugin install passport --marketplace postmanlabs/postman-passport-setup` |
-| Codex | `codex plugin marketplace add postmanlabs/postman-passport-setup`, then `codex plugin add passport@passport-proxy-setup` (or pick it in `/plugins`); start a new session |
-| Cursor | Add it as a marketplace: **Customize → Browse Marketplace → Add Marketplace → Import from GitHub**, paste `https://github.com/postmanlabs/postman-passport-setup`, then install **passport** (CLI: `agent plugin marketplace add https://github.com/postmanlabs/postman-passport-setup`, then `/plugin`). Or clone it as a local plugin: `git clone https://github.com/postmanlabs/postman-passport-setup ~/.cursor/plugins/local/passport`, then run **Developer: Reload Window** |
-| Any agent with skills (Claude Code, Codex, Cursor, Copilot, Gemini CLI, …) | `npx skills add postmanlabs/postman-passport-setup` |
+| Claude Code | `/plugin install passport --marketplace postmanlabs/passport-skills` |
+| Codex | `codex plugin marketplace add postmanlabs/passport-skills`, then `codex plugin add passport@passport-proxy-setup` (or pick it in `/plugins`); start a new session |
+| Cursor | Add it as a marketplace: **Customize → Browse Marketplace → Add Marketplace → Import from GitHub**, paste `https://github.com/postmanlabs/passport-skills`, then install **passport** (CLI: `agent plugin marketplace add https://github.com/postmanlabs/passport-skills`, then `/plugin`). Or clone it as a local plugin: `git clone https://github.com/postmanlabs/passport-skills ~/.cursor/plugins/local/passport`, then run **Developer: Reload Window** |
+| Any agent with skills (Claude Code, Codex, Cursor, Copilot, Gemini CLI, …) | `npx skills add postmanlabs/passport-skills` |
 
 If your Claude Code doesn't recognise `--marketplace`, use
-`/plugin marketplace add postmanlabs/postman-passport-setup` and then
+`/plugin marketplace add postmanlabs/passport-skills` and then
 `/plugin install passport@passport-proxy-setup`. The plugin's old name still works too:
 `/plugin install passport-proxy-setup@passport-proxy-setup` installs the same plugin.
 
 ### Or run it from a clone
 ```
-git clone https://github.com/postmanlabs/postman-passport-setup
-cd postman-passport-setup
+git clone https://github.com/postmanlabs/passport-skills
+cd passport-skills
 # start your agent here and type:
 setup passport
 ```

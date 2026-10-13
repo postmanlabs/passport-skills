@@ -9,7 +9,7 @@
     "shortDescription": "Set up and verify a Passport proxy (local Docker or AWS)",
     "developerName": "postmanlabs",
     "category": "Developer Tools",
-    "websiteURL": "https://github.com/postmanlabs/postman-passport-setup",
+    "websiteURL": "https://github.com/postmanlabs/passport-skills",
     "defaultPrompt": "setup passport"
   }
 }
