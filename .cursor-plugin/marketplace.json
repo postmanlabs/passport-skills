@@ -1,5 +1,5 @@
 {
-  "name": "postman-passport-setup",
+  "name": "passport-proxy-setup",
   "owner": { "name": "postmanlabs" },
   "metadata": {
     "description": "Set up and verify a Postman Passport proxy (local Docker or a single AWS EC2 instance)."

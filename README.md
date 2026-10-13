@@ -12,13 +12,14 @@ the matching guide.
 | Agent | Install |
 |---|---|
 | Claude Code | `/plugin install passport --marketplace postmanlabs/postman-passport-setup` |
-| Codex | `codex plugin marketplace add postmanlabs/postman-passport-setup`, then `codex plugin add passport@postman-passport-setup` (or pick it in `/plugins`); start a new session |
+| Codex | `codex plugin marketplace add postmanlabs/postman-passport-setup`, then `codex plugin add passport@passport-proxy-setup` (or pick it in `/plugins`); start a new session |
 | Cursor | Add it as a marketplace: **Customize → Browse Marketplace → Add Marketplace → Import from GitHub**, paste `https://github.com/postmanlabs/postman-passport-setup`, then install **passport** (CLI: `agent plugin marketplace add https://github.com/postmanlabs/postman-passport-setup`, then `/plugin`). Or clone it as a local plugin: `git clone https://github.com/postmanlabs/postman-passport-setup ~/.cursor/plugins/local/passport`, then run **Developer: Reload Window** |
 | Any agent with skills (Claude Code, Codex, Cursor, Copilot, Gemini CLI, …) | `npx skills add postmanlabs/postman-passport-setup` |
 
 If your Claude Code doesn't recognise `--marketplace`, use
 `/plugin marketplace add postmanlabs/postman-passport-setup` and then
-`/plugin install passport@postman-passport-setup`.
+`/plugin install passport@passport-proxy-setup`. The plugin's old name still works too:
+`/plugin install passport-proxy-setup@passport-proxy-setup` installs the same plugin.
 
 ### Or run it from a clone
 ```
@@ -53,7 +54,7 @@ skills/passport-setup/    the skill, self-contained (installs copy only this fol
   templates/              user-data, CloudFront, operator-iam-policy.json
 AGENTS.md                 entry point in a clone + rules for editing this repo
                           (CLAUDE.md, GEMINI.md, .cursor/, .github/ are one-line shims)
-.claude-plugin/           Claude Code marketplace + plugin "passport"
+.claude-plugin/           Claude Code marketplace "passport-proxy-setup" + plugin "passport"
 .cursor-plugin/           Cursor marketplace + plugin "passport"
 .agents/plugins/, .codex-plugin/   Codex marketplace + plugin "passport"
 ```
