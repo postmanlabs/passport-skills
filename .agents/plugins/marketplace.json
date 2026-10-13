@@ -1,5 +1,5 @@
 {
-  "name": "passport-proxy-setup",
+  "name": "passport-skills",
   "interface": { "displayName": "Postman Passport setup" },
   "plugins": [
     {

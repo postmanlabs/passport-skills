@@ -13,13 +13,12 @@ in its guides means the absolute path of `skills/passport-setup/`.
   folder, and the Claude Code, Codex and Cursor plugins load the skill from it. A file outside it is missing after
   an install. Don't use symlinks to reach outside it: `skills update` doesn't notice changes behind them,
   and Windows checkouts turn them into text files.
-- **Plugin names.** The plugin is `passport` and the marketplace is `passport-proxy-setup` in every
+- **Plugin names.** The plugin is `passport` and the marketplace is `passport-skills` in every
   manifest: `.claude-plugin/` (Claude Code), `.cursor-plugin/` (Cursor), and
   `.agents/plugins/marketplace.json` + `.codex-plugin/plugin.json` (Codex). The README's install commands
-  depend on these names. `.claude-plugin/marketplace.json` also lists the plugin under its old name,
-  `passport-proxy-setup`, so `/plugin install passport-proxy-setup@passport-proxy-setup` keeps working;
-  don't remove that entry or rename the marketplace. Keep `version` equal in the three `plugin.json` files
-  and bump it when the skill changes, so plugin updates pick it up. CI checks all of this.
+  (`passport@passport-skills`) depend on these names, so renaming either one breaks every existing
+  install. Keep `version` equal in the three `plugin.json` files and bump it when the skill changes, so
+  plugin updates pick it up. CI checks all of this.
 - **One home per fact.** Rules: `skills/passport-setup/SKILL.md`. Setup steps: the two guides. The why:
   `concepts.md`. Symptoms and fixes: `troubleshooting.md`. What was tested and when: `verification.md`
   (not inline "verified on" notes). Link to the home instead of copying it.

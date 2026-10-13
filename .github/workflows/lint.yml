@@ -24,12 +24,9 @@ jobs:
             [ "$(jq -r .name "$f")" = passport ] || fail "$f: name must be passport"
           done
           for f in .claude-plugin/marketplace.json .agents/plugins/marketplace.json .cursor-plugin/marketplace.json; do
-            [ "$(jq -r .name "$f")" = passport-proxy-setup ] || fail "$f: marketplace name must be passport-proxy-setup"
-            jq -e '[.plugins[].name] | index("passport")' "$f" >/dev/null || fail "$f: no passport entry"
+            [ "$(jq -r .name "$f")" = passport-skills ] || fail "$f: marketplace name must be passport-skills"
+            jq -e '[.plugins[].name] == ["passport"]' "$f" >/dev/null || fail "$f: must list exactly one plugin, passport"
           done
-          # The Claude marketplace also keeps the old plugin name, so old install commands still work.
-          jq -e '[.plugins[].name] | sort == ["passport","passport-proxy-setup"]' .claude-plugin/marketplace.json >/dev/null \
-            || fail ".claude-plugin/marketplace.json must list exactly passport and passport-proxy-setup"
           [ "$(jq -r .version .claude-plugin/plugin.json .codex-plugin/plugin.json .cursor-plugin/plugin.json | sort -u | wc -l)" -eq 1 ] \
             || fail "plugin.json versions differ"
       - name: Entry points exist
