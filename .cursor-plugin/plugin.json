@@ -4,6 +4,6 @@
   "version": "0.2.0",
   "description": "Step-by-step, agent-runnable skill to set up and verify a Postman Passport proxy: locally in Docker, or on a single EC2 instance with CloudFront.",
   "author": { "name": "postmanlabs" },
-  "repository": "https://github.com/postmanlabs/postman-passport-setup",
+  "repository": "https://github.com/postmanlabs/passport-skills",
   "keywords": ["passport", "postman", "proxy", "aws", "docker", "vault"]
 }
