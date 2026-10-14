@@ -9,7 +9,7 @@ description: >
   APIs, create a secret reference, bind a credential to an endpoint, request or check access to a
   credential, approve or reject an access request with an admin key, says they would rather not paste an API key into the chat, or when a task needs a
   credential the agent does not have. Also use to get the Passport CLI itself working end to end —
-  when `pmcli whoami` shows no identity or an expired one, when `pmcli setup` reports no proxy
+  when `passport whoami` shows no identity or an expired one, when `passport setup` reports no proxy
   attached, or when the user asks to install, log in to, provision, or locally set up Passport. Does
   NOT return secret values — it returns a pointer that the local Passport proxy resolves at request
   time.
@@ -46,36 +46,32 @@ fails to authenticate and gets logged by the upstream service.
 
 ## Prerequisite: a working proxy and CLI
 
-This skill assumes Passport is already set up — a local (or AWS) proxy running and the `pmcli` CLI
+This skill assumes Passport is already set up — a local (or AWS) proxy running and the `passport` CLI
 installed and logged in. **Getting there is the `passport-setup` skill's job; use it first** — it ships
 in the same `passport` plugin, so if it isn't available, install the plugin:
-`/plugin install passport --marketplace postmanlabs/passport-skills`. (On the enterprise beta you can
-instead stand up a local proxy directly with
-`pmcli provision` then `pmcli provision-guide` — neither prompts, so an agent can drive them, but
-confirm Docker is running first.) Don't re-derive the setup here.
+`/plugin install passport --marketplace postmanlabs/passport-skills`. Don't re-derive the setup here.
 
-`pmcli` is the command on the enterprise beta build. The generally installed binary is named
-`passport` (a community build that omits provisioning). One probe tells you whether you're ready:
+One probe tells you whether you're ready:
 
 ```
-pmcli request https://postman-echo.com/get
+passport request https://postman-echo.com/get
 ```
 
 If that returns the upstream's response, you're set — skip to **Authenticate**. `code=WORKOS_REAUTH_REQUIRED`
-means the login lapsed: `pmcli login` opens a browser, so hand it to the user. A missing `pmcli`
-(`command -v pmcli`), no proxy attached, or any other bring-up failure means run `passport-setup`
+means the login lapsed: `passport login` opens a browser, so hand it to the user. A missing `passport`
+(`command -v passport`), no proxy attached, or any other bring-up failure means run `passport-setup`
 first — suggest it rather than provisioning from here. Name the credential you need and what it is
 for; if the user declines to set Passport up, they configure the credential themselves and your code
 reads it by name, and you still never take the value into the conversation.
 
 Two things specific to this API once the proxy is up:
 
-- **Create references with `vaultType: hashicorp` for local work.** A local provision runs a
+- **Create references with `vaultType: hashicorp` for local work.** A local Passport setup runs a
   HashiCorp dev Vault; a reference whose `vaultType` is anything else (pre-existing `aws` grants,
   say) resolves to `502` with `x-passport-proxy-error: unsupported-vault-type`, naming the ref in
   `x-passport-proxy-refs`.
-- **Certs last about five minutes.** `pmcli whoami` output goes stale inside a single task, so
-  re-read it rather than caching, and expect `pmcli request` to re-issue the cert mid-run.
+- **Certs last about five minutes.** `passport whoami` output goes stale inside a single task, so
+  re-read it rather than caching, and expect `passport request` to re-issue the cert mid-run.
 
 ## Authenticate
 
@@ -218,16 +214,16 @@ populate once someone acts.
 Build the request with `{{vault:<secretReferenceId>}}` where the credential goes and route it
 through the local Passport proxy. Three things to get right:
 
-- **Prefer `pmcli request` for anything you send yourself.** It carries the stored cert and
+- **Prefer `passport request` for anything you send yourself.** It carries the stored cert and
   routes through the proxy without depending on environment variables, so it works in a fresh
   non-interactive shell where exported proxy vars do not exist:
-  `pmcli request -X POST -H 'Authorization: Bearer {{vault:<id>}}' https://api.example.com/v1/x`.
+  `passport request -X POST -H 'Authorization: Bearer {{vault:<id>}}' https://api.example.com/v1/x`.
   There is no `lens` command on this CLI — it belongs to the separate `passport-cli-ce` product.
   The CLI's own warning text suggests `passport lens env`; ignore it, the command does not exist.
 
-- **For third-party tools, install the daemon instead of exporting by hand.** `pmcli daemon
+- **For third-party tools, install the daemon instead of exporting by hand.** `passport daemon
   install` sets up the daemon plus the env agents that put `HTTPS_PROXY` and the CA bundle vars in
-  place, and `pmcli ca install` adds the CA to the OS trust store for tools that ignore env vars.
+  place, and `passport ca install` adds the CA to the OS trust store for tools that ignore env vars.
   Both need a new shell before the values appear. Always call the real upstream host — the proxy
   intercepts transparently and is not a base URL you swap in. Never hand-set the port: TLS fails
   without the CA.
