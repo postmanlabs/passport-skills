@@ -1,6 +1,6 @@
 {
   "name": "passport-skills",
-  "interface": { "displayName": "Postman Passport setup" },
+  "interface": { "displayName": "Postman Passport" },
   "plugins": [
     {
       "name": "passport",

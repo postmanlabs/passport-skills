@@ -1,12 +1,12 @@
 {
   "name": "passport",
-  "version": "0.2.0",
-  "description": "Step-by-step, agent-runnable skill to set up and verify a Postman Passport proxy: locally in Docker, or on a single EC2 instance with CloudFront.",
+  "version": "0.3.0",
+  "description": "Step-by-step, agent-runnable skills for Postman Passport: set up and verify a proxy (locally in Docker, or on a single EC2 instance with CloudFront), then register APIs and manage credentials programmatically via the Passport public API.",
   "keywords": ["passport", "postman", "proxy", "aws", "docker", "vault"],
   "skills": "./skills/",
   "interface": {
     "displayName": "Postman Passport",
-    "shortDescription": "Set up and verify a Passport proxy (local Docker or AWS)",
+    "shortDescription": "Set up and verify a Passport proxy (local Docker or AWS) and manage credentials via the public API",
     "developerName": "postmanlabs",
     "category": "Developer Tools",
     "websiteURL": "https://github.com/postmanlabs/passport-skills",

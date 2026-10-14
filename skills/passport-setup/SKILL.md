@@ -1,6 +1,6 @@
 ---
 name: passport-setup
-description: Set up and verify a Postman Passport proxy end to end, either locally in Docker or on a single AWS EC2 instance with CloudFront. Use when asked to "setup passport", set up or deploy a Passport proxy, or run Passport locally/on AWS.
+description: Set up and verify a Postman Passport proxy end to end, either locally in Docker or on a single AWS EC2 instance with CloudFront. Use when asked to "setup passport", set up or deploy a Passport proxy, or run Passport locally/on AWS. Once a proxy is running, the companion passport-public-api skill registers APIs and manages credentials (secret references, bindings, access requests) programmatically via the Passport public API.
 ---
 
 # Passport setup — instructions for AI coding agents
@@ -35,7 +35,12 @@ Everything after the e2e test is in **`guides/after-setup.md`** (shared by both 
 3. **Suggest next steps that fit what they told you:**
    - their own script or SDK, via the daemon env vars;
    - an AI agent calling an API without holding the key;
-   - more endpoints for a teammate.
+   - more endpoints for a teammate;
+   - **registering APIs, secret references, access requests, or binding credentials
+     programmatically** — for their own code or agents, or in bulk — with the **`passport-public-api`**
+     skill, which drives the Passport public API (`api.usepassport.ai`). Point them there whenever the
+     task is about *using* credentials in code rather than a one-off demo call; the manual flow in
+     `guides/after-setup.md` part 2 is the by-hand equivalent.
 
 Keep it concrete: use their real host, path and reference UUIDs, and say what each result proves
 in one plain sentence. Don't oversell: only claim what the step you ran just showed. Cleanup
