@@ -1,4 +1,4 @@
-<img src="assets/logo.svg" alt="Postman Passport" width="64" />
+![Postman Passport](assets/logo.svg)
 
 # passport-skills
 
@@ -62,6 +62,28 @@ The agent reads `AGENTS.md`, which points it at the right skill. No agent? Open 
 ## Safety
 Secrets never go in chat, user-data or logs; every AWS change is confirmed first; teardown only runs when you say so.
 
+## What the skills run and connect to
+The plugin has no hooks, MCP servers or background processes. Everything below is a step in a skill's
+guide that the agent runs in your terminal once that skill is in use.
+
+- **Installs:** the Passport CLI from `dl-passport.pstmn.io` (the macOS `.pkg` with `sudo installer`,
+  or the Windows build). The
+  AWS guide also installs the AWS CLI v2 from `awscli.amazonaws.com` and the Session Manager plugin
+  from `s3.amazonaws.com` if they're missing.
+- **Docker images:** the Passport proxy from `ociregistry.usepassport.ai` (after `docker login` with
+  your registry key), `hashicorp/vault` for the local Vault, and `node:20` for the CLI daemon on MDM Macs.
+- **Passport services:** `app.usepassport.ai` and `api.usepassport.ai`, for sign-in, the public API, and
+  proxy registration.
+- **AWS (AWS guide only):** in the account and region you choose, it creates one EC2 instance, an
+  Elastic IP, a security group, an IAM role and instance profile, and a CloudFront distribution and
+  function. `checkip.amazonaws.com` is used to find your public IP for the security group.
+- **Verification calls:** a demo API at `passport-demo.mock.postman.postman.dev` and, optionally,
+  `api.github.com/user` as the "add your own API" example, both sent through your proxy.
+- **Secrets:** you keep them out of the chat. The registry key goes to `docker login` through stdin.
+  The WorkOS API key is read from an environment variable you set, and is sent only to
+  `api.usepassport.ai`. Vault secret values are typed at a hidden prompt (`read -s`) in your own
+  terminal.
+
 ## Layout
 ```
 skills/                   two skills, each self-contained (installs copy a skill's own folder)
@@ -78,7 +100,7 @@ AGENTS.md                 entry point in a clone + rules for editing this repo
 .claude-plugin/           Claude Code marketplace "passport-skills" + plugin "passport"
 .cursor-plugin/           Cursor marketplace + plugin "passport"
 .agents/plugins/, .codex-plugin/   Codex marketplace + plugin "passport"
-assets/logo.svg           Passport mark (from the Passport app)
+assets/                   the Passport logo
 ```
 
 ## License
