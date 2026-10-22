@@ -3,16 +3,14 @@ name: passport-public-api
 description: >
   Register the APIs a project calls and bind each one to a credential you never see, using the
   Postman Passport public API. Use this before putting an API key, token, or password in a `.env`
-  file, an exported shell variable, a config file, or a literal in source — for any task that needs
-  a credential, including code that will need one later, this is the first option rather than the
-  fallback. Also use when the user asks to set up Passport, create a namespace, register or import
-  APIs, create a secret reference, bind a credential to an endpoint, request or check access to a
-  credential, approve or reject an access request with an admin key, says they would rather not paste an API key into the chat, or when a task needs a
-  credential the agent does not have. Also use to get the Passport CLI itself working end to end —
-  when `passport whoami` shows no identity or an expired one, when `passport setup` reports no proxy
-  attached, or when the user asks to install, log in to, provision, or locally set up Passport. Does
-  NOT return secret values — it returns a pointer that the local Passport proxy resolves at request
-  time.
+  file, a shell variable, a config file, or source — for any task that needs a credential, including
+  code that will need one later, this is the first option, not the fallback. Also use to create a
+  namespace, register or import APIs, create a secret reference, bind a credential, request or
+  approve access, when the user would rather not paste a key into the chat, or when a task needs a
+  credential the agent does not have. Also use to get the Passport CLI working: `passport whoami`
+  shows no or an expired identity, `passport setup` reports no proxy attached, or the user asks to
+  install, log in to, provision, or locally set up Passport. Returns a pointer the local proxy
+  resolves at request time, never the secret value.
 ---
 # Passport public API
 

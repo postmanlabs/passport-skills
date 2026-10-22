@@ -1,3 +1,5 @@
+<img src="assets/logo.svg" alt="Postman Passport" width="64" />
+
 # passport-skills
 
 > **Note:** the AWS guide creates billable resources.
@@ -76,4 +78,8 @@ AGENTS.md                 entry point in a clone + rules for editing this repo
 .claude-plugin/           Claude Code marketplace "passport-skills" + plugin "passport"
 .cursor-plugin/           Cursor marketplace + plugin "passport"
 .agents/plugins/, .codex-plugin/   Codex marketplace + plugin "passport"
+assets/logo.svg           Passport mark (from the Passport app)
 ```
+
+## License
+[Apache-2.0](LICENSE)

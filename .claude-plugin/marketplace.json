@@ -1,6 +1,7 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "passport-skills",
-  "owner": { "name": "postmanlabs" },
+  "owner": { "name": "Postman", "url": "https://github.com/postmanlabs" },
   "metadata": {
     "description": "Set up and verify a Postman Passport proxy (local Docker or a single AWS EC2 instance), and use the public API to register APIs and manage credentials."
   },
@@ -8,7 +9,13 @@
     {
       "name": "passport",
       "source": "./",
-      "description": "Set up and verify a Postman Passport proxy (local Docker, AWS single instance), then register APIs and manage credentials via the public API."
+      "displayName": "Postman Passport",
+      "description": "Set up and verify a Postman Passport proxy (local Docker, AWS single instance), then register APIs and manage credentials via the public API.",
+      "homepage": "https://github.com/postmanlabs/passport-skills",
+      "repository": "https://github.com/postmanlabs/passport-skills",
+      "license": "Apache-2.0",
+      "keywords": ["passport", "postman", "proxy", "aws", "docker", "vault"],
+      "category": "security"
     }
   ]
 }
