@@ -47,3 +47,15 @@ jobs:
           for f in skills/*/SKILL.md; do
             head -1 "$f" | grep -q '^---$' && grep -q '^name: ' "$f" && grep -q '^description: ' "$f" || { echo "bad frontmatter: $f"; exit 1; }
           done
+      - name: SKILL.md description fits the 1024-character limit
+        run: |
+          for f in skills/*/SKILL.md; do
+            node -e '
+              const fm = require("fs").readFileSync(process.argv[1], "utf8").split(/^---$/m)[1];
+              const m = fm.match(/^description:[ \t]*>[-+]?[ \t]*\n((?:[ \t]+.*\n?)*)/m) || fm.match(/^description:[ \t]*(.*)$/m);
+              const d = m[1].split("\n").map(s => s.trim()).filter(Boolean).join(" ");
+              if (d.length > 1024) { console.log(`${process.argv[1]}: description is ${d.length} characters (max 1024)`); process.exit(1); }
+            ' "$f"
+          done
+      - name: Claude Code accepts the marketplace and plugin manifests
+        run: npx -y @anthropic-ai/claude-code plugin validate .
