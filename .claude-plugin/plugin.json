@@ -7,6 +7,10 @@
   "author": { "name": "Postman", "url": "https://github.com/postmanlabs" },
   "homepage": "https://github.com/postmanlabs/passport-skills",
   "repository": "https://github.com/postmanlabs/passport-skills",
+  "documentationUrl": "https://docs.usepassport.ai/passport/get-started/overview",
+  "supportUrl": "https://github.com/postmanlabs/passport-skills/issues",
+  "privacyPolicyUrl": "https://www.postman.com/legal/privacy-policy/",
+  "termsOfServiceUrl": "https://www.postman.com/legal/terms/",
   "license": "Apache-2.0",
   "keywords": ["passport", "postman", "proxy", "aws", "docker", "vault"]
 }
