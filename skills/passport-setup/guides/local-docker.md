@@ -84,6 +84,11 @@ irm "https://dl-passport.pstmn.io/install/enterprise/win64.ps1" | iex
 
 Check it with `passport --version`. To update later, run the same command
 again; it replaces the install in place.
+If it doesn't print the version the installer just reported, an older
+`passport` is earlier on `PATH` and shadows it: `which -a passport` lists them
+all (on macOS the installer puts it in `/usr/local/bin`). Tell the user which
+one runs; don't delete either without asking, since a running daemon may use
+it.
 
 > **Full CLI only, never the Community Edition.** The Community Edition
 > (`npm i -g @postman/postman-passport`) also installs a command named
