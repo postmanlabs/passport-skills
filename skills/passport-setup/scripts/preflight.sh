@@ -13,6 +13,8 @@ else bad "AWS CLI not installed (guide step 1.2)"; fi
 command -v session-manager-plugin >/dev/null && ok "session-manager-plugin $(session-manager-plugin --version 2>/dev/null)" \
   || bad "Session Manager plugin not installed (guide step 1.2) — needed for the interactive registry login"
 if command -v passport >/dev/null; then ok "passport CLI $(passport --version 2>/dev/null) (setup needs >= 0.6.0)"
+  command -v npm >/dev/null && npm ls -g @postman/postman-passport >/dev/null 2>&1 \
+    && bad "Passport CLI Community Edition (npm @postman/postman-passport) is installed and may shadow the full CLI on PATH (guide step 1.1)"
 else info "passport CLI not on PATH (guide step 1.1; MDM Macs use the container CLI instead)"; fi
 for t in openssl curl jq node; do command -v "$t" >/dev/null && ok "$t" || bad "$t not installed"; done
 
