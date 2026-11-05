@@ -147,25 +147,39 @@ Then go through 1.1–1.4 and do only what's missing.
 
 ### 1.1 Passport CLI ([you] for the install and the browser approval)
 
-You need **version 0.6.0 or later**.
+You need **version 0.6.0 or later**. Use the official installer from the
+[Passport CLI install docs](https://docs.usepassport.ai/passport/reference/passport-cli/install).
+It detects the OS and architecture and always installs the latest version. It
+may ask for administrator credentials, so it runs in the user's terminal.
 
-**macOS** (needs `sudo`, so it runs in the user's terminal):
+**macOS or Linux:**
 
 ```bash
-curl -fL -o ~/Downloads/passport.pkg "https://dl-passport.pstmn.io/download/version/0.6.0-canary-260921-212749/osx_$([ "$(uname -m)" = arm64 ] && echo arm64 || echo 64)?channel=canary"
-sudo installer -pkg ~/Downloads/passport.pkg -target /
+curl -fsSL "https://dl-passport.pstmn.io/install/enterprise/unix.sh" | sh
 ```
 
-**Windows (PowerShell, as administrator):**
+**Windows (PowerShell):**
 
 ```powershell
-curl.exe -fL -o $env:USERPROFILE\Downloads\passport.msi "https://dl-passport.pstmn.io/download/version/0.6.0-canary-260921-212749/win_64?channel=canary"
-msiexec /i $env:USERPROFILE\Downloads\passport.msi /quiet
+irm "https://dl-passport.pstmn.io/install/enterprise/win64.ps1" | iex
 ```
 
-If either URL returns 404, the pinned build has rotated off the server. Get the
-current link from the **Set up Passport** guide in your Passport team (account
-menu → How-to).
+Check it with `passport --version`. To update, run the same command again; it
+replaces the install in place.
+
+Then run `which -a passport`. The installer puts the CLI in
+`/usr/local/bin/passport`. If another `passport` comes first, it shadows the
+new install, and both `passport --version` and the installer's own "installed
+successfully" line report that older copy. Compare
+`/usr/local/bin/passport --version` with `passport --version`, tell the user
+which one runs, and don't delete either without asking (a running daemon may
+use it).
+
+> **Full CLI only, never the Community Edition.** The Community Edition
+> (`npm i -g @postman/postman-passport`) also installs a command named
+> `passport`, and whichever is earlier on `PATH` wins. Don't install it. If
+> `npm ls -g @postman/postman-passport` lists it, stop and ask the user before
+> removing it (`npm uninstall -g @postman/postman-passport`).
 
 **Log in:**
 - **Run it:** the agent runs `passport login` and shows the printed URL and

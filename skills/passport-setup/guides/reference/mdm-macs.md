@@ -53,12 +53,22 @@ Then do A.1–A.3 in place of the host login.
 
 ### A.1 Get a Linux build of the CLI
 
-The public installer only serves macOS/Windows. You need a **Linux build of
-the Passport CLI** (`passport` binary + `lib/`, arm64 or x64 to match
-`docker run --rm node:20 uname -m`). Get it from your Passport admin or the
-"Set up Passport" guide in your team (account menu → How-to), and unpack it
-into `~/passport-cli-dl` so that `~/passport-cli-dl/passport` exists.
-*Unverified:* a public Linux download location; ask the Passport team.
+You need a **Linux build of the full Passport CLI** (`passport` binary +
+`lib/`) in `~/passport-cli-dl`, so that `~/passport-cli-dl/passport` exists.
+Run the [official installer](https://docs.usepassport.ai/passport/reference/passport-cli/install)
+in a throwaway container: it picks the container's architecture, installs to
+`/usr/local/bin/passport` with `lib/` beside it, and needs no `sudo` there
+(the container runs as root). Then copy both into the mounted folder:
+
+```bash
+mkdir -p ~/passport-cli-dl
+docker run --rm -v ~/passport-cli-dl:/cli node:20 sh -c \
+  'curl -fsSL "https://dl-passport.pstmn.io/install/enterprise/unix.sh" | sh && cp -R /usr/local/bin/passport /usr/local/bin/lib /cli/'
+```
+
+If `~/passport-cli-dl` already has a `passport`, this replaces it (keep
+`.passport/`, the login). Never use the npm Community Edition
+(`@postman/postman-passport`) here.
 
 Don't try to build the CLI from source; it needs internal registry access.
 
