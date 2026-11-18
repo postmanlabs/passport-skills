@@ -61,8 +61,8 @@ Do this **before** getting a registry credential — the registry settings
 page needs a team to exist first, and this step is how you find out whether
 yours does.
 
-> Already have the CLI? Check with `passport --version` and skip the install
-> below if it prints a version.
+> Already have the CLI? Run `passport login --help` and skip the install below
+> only if that command succeeds. Another `passport` may have the same name.
 
 Use the official installer from the
 [Passport CLI install docs](https://docs.usepassport.ai/passport/reference/passport-cli/install).
@@ -93,8 +93,8 @@ successfully" line report that older copy. Compare
 which one runs, and don't delete either without asking (a running daemon may
 use it).
 
-> **Use the full Passport CLI.** Another `passport` installation can shadow the
-> full CLI on your `PATH`. Run the preflight check above before continuing.
+> **Use the full Passport CLI.** If another `passport` shadows it on your
+> `PATH`, correct the path before continuing.
 
 Check for an MDM-managed Mac first (read-only):
 

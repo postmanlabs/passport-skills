@@ -175,8 +175,8 @@ successfully" line report that older copy. Compare
 which one runs, and don't delete either without asking (a running daemon may
 use it).
 
-> **Use the full Passport CLI.** Another `passport` installation can shadow the
-> full CLI on your `PATH`. Run the preflight check above before continuing.
+> **Use the full Passport CLI.** If another `passport` shadows it on your
+> `PATH`, correct the path before continuing.
 
 **Log in:**
 - **Run it:** the agent runs `passport login` and shows the printed URL and
