@@ -62,7 +62,7 @@ page needs a team to exist first, and this step is how you find out whether
 yours does.
 
 > Already have the CLI? Check with `passport --version` and skip the install
-> below if it prints a version (and it isn't the Community Edition, see below).
+> below if it prints a version.
 
 Use the official installer from the
 [Passport CLI install docs](https://docs.usepassport.ai/passport/reference/passport-cli/install).
@@ -93,11 +93,8 @@ successfully" line report that older copy. Compare
 which one runs, and don't delete either without asking (a running daemon may
 use it).
 
-> **Full CLI only, never the Community Edition.** The Community Edition
-> (`npm i -g @postman/postman-passport`) also installs a command named
-> `passport`, and whichever is earlier on `PATH` wins. Don't install it. If
-> `npm ls -g @postman/postman-passport` lists it, stop and ask the user before
-> removing it (`npm uninstall -g @postman/postman-passport`).
+> **Use the full Passport CLI.** Another `passport` installation can shadow the
+> full CLI on your `PATH`. Run the preflight check above before continuing.
 
 Check for an MDM-managed Mac first (read-only):
 

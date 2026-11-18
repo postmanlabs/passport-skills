@@ -216,8 +216,7 @@ through the local Passport proxy. Three things to get right:
   routes through the proxy without depending on environment variables, so it works in a fresh
   non-interactive shell where exported proxy vars do not exist:
   `passport request -X POST -H 'Authorization: Bearer {{vault:<id>}}' https://api.example.com/v1/x`.
-  There is no `lens` command on this CLI — it belongs to the separate `passport-cli-ce` product.
-  The CLI's own warning text suggests `passport lens env`; ignore it, the command does not exist.
+  This CLI has no `lens` command. Do not use unsupported `lens` subcommands.
 
 - **For third-party tools, install the daemon instead of exporting by hand.** `passport daemon
   install` sets up the daemon plus the env agents that put `HTTPS_PROXY` and the CA bundle vars in
