@@ -67,8 +67,7 @@ docker run --rm -v ~/passport-cli-dl:/cli node:20 sh -c \
 ```
 
 If `~/passport-cli-dl` already has a `passport`, this replaces it (keep
-`.passport/`, the login). Never use the npm Community Edition
-(`@postman/postman-passport`) here.
+`.passport/`, the login). Use the full Passport CLI here.
 
 Don't try to build the CLI from source; it needs internal registry access.
 

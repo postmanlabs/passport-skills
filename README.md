@@ -67,7 +67,7 @@ The plugin has no hooks, MCP servers or background processes. Everything below i
 guide that the agent runs in your terminal once that skill is in use.
 
 - **Installs:** the full Passport CLI with the official installer from `dl-passport.pstmn.io`
-  (`unix.sh` on macOS/Linux, `win64.ps1` on Windows), never the npm Community Edition. The
+  (`unix.sh` on macOS/Linux, `win64.ps1` on Windows). The
   AWS guide also installs the AWS CLI v2 from `awscli.amazonaws.com` and the Session Manager plugin
   from `s3.amazonaws.com` if they're missing.
 - **Docker images:** the Passport proxy from `ociregistry.usepassport.ai` (after `docker login` with

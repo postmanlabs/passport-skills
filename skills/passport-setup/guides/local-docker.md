@@ -61,8 +61,13 @@ Do this **before** getting a registry credential — the registry settings
 page needs a team to exist first, and this step is how you find out whether
 yours does.
 
-> Already have the CLI? Check with `passport --version` and skip the install
-> below if it prints a version (and it isn't the Community Edition, see below).
+Run the Enterprise installer below even if `passport` is already installed:
+the Community CLI also uses that command name. First run
+`npm ls -g @postman/postman-passport --depth=0`. If it lists the package,
+Community was installed through npm. Ask the user before removing it with
+`npm uninstall -g @postman/postman-passport`, then install Enterprise. If npm
+does not list it, an earlier download-script install needs no separate removal:
+the Enterprise installer replaces the binary at the standard install location.
 
 Use the official installer from the
 [Passport CLI install docs](https://docs.usepassport.ai/passport/reference/passport-cli/install).
@@ -82,22 +87,15 @@ curl -fsSL "https://dl-passport.pstmn.io/install/enterprise/unix.sh" | sh
 irm "https://dl-passport.pstmn.io/install/enterprise/win64.ps1" | iex
 ```
 
-Check it with `passport --version`. To update later, run the same command
-again; it replaces the install in place.
+Check `passport --help`: the active Enterprise CLI lists `login` and `setup`.
+Community lists `lens` instead. To update later, run the installer again.
 
-Then run `which -a passport`. The installer puts the CLI in
-`/usr/local/bin/passport`. If another `passport` comes first, it shadows the
-new install, and both `passport --version` and the installer's own "installed
-successfully" line report that older copy. Compare
-`/usr/local/bin/passport --version` with `passport --version`, tell the user
-which one runs, and don't delete either without asking (a running daemon may
-use it).
-
-> **Full CLI only, never the Community Edition.** The Community Edition
-> (`npm i -g @postman/postman-passport`) also installs a command named
-> `passport`, and whichever is earlier on `PATH` wins. Don't install it. If
-> `npm ls -g @postman/postman-passport` lists it, stop and ask the user before
-> removing it (`npm uninstall -g @postman/postman-passport`).
+On macOS or Linux, run `which -a passport`. The installer puts the CLI in
+`/usr/local/bin/passport`. If another copy comes first, it shadows the new
+install. Compare `/usr/local/bin/passport --help` with `passport --help` and
+correct `PATH` before continuing. On Windows, use
+`Get-Command passport -All` to find each copy. Do not delete a shadowing
+binary without asking: a running daemon may use it.
 
 Check for an MDM-managed Mac first (read-only):
 
