@@ -13,10 +13,11 @@ skill, or run from a clone of the repo.
 When the user says **"setup passport"** (or similar: "set up the Passport proxy", "run Passport locally",
 "deploy Passport on AWS"):
 
-1. Ask which target they want — one question:
-   - **Local Docker** → follow `guides/local-docker.md`
-   - **AWS single EC2 instance** → follow `guides/aws-single-instance.md`
-2. Follow that guide **literally and do every step yourself**. The ground rules below apply to both
+1. Ask whether this is for **one developer on this machine** or **a team**:
+   - **One developer** → follow `guides/local-docker.md`
+   - **Team deployment on AWS** → follow `guides/aws-single-instance.md`
+2. Follow that guide **literally**. Do agent steps yourself and hand the
+   marked browser, token and secret-entry steps to the developer. The ground rules below apply to both
    guides; each guide's agent section adds only what's specific to it. Paths like `guides/…` are
    relative to this folder, and `$SKILL_DIR` in the guides means its absolute path (the folder
    containing this `SKILL.md`).
@@ -29,9 +30,12 @@ them see, on their own APIs, what Passport does for them, and to help as much as
 Everything after the e2e test is in **`guides/after-setup.md`** (shared by both setups):
 
 1. **Send the short handoff** (part 1): value first, one proof command, one next step.
-2. **Offer to add their own API** (part 2). Ask what they want to call and
-   how it takes the credential. Never ask for the secret value; they store it themselves. Give
-   both full `curl` forms: with the proxy and cert flags, and the env-var/daemon form.
+2. **For local setup, show the app's “See what was created” step**, then offer
+   to add their own API. The developer can have you create it or use the app's
+   guided flow. Follow their choice; check existing objects before creating
+   anything, so the two paths do not create duplicates. Never ask for the
+   secret value in chat. Give both `curl` forms when testing their API: with
+   explicit proxy/cert flags and, if verified, with the daemon environment.
 3. **Suggest next steps that fit what they told you:**
    - their own script or SDK, via the daemon env vars;
    - an AI agent calling an API without holding the key;
@@ -51,13 +55,16 @@ still waits until they say so.
   missing, ask the user — don't search elsewhere.
 - **Discover before asking.** Check installed tools, profiles, regions, login state and existing resources
   first; infer routine choices and state them; ask only for what's genuinely missing, in one go.
-- **Ask before every cloud change, naming every resource.** Show a table of exactly what will be created or
+- **Ask before every AWS infrastructure change, naming every resource.** Show a table of exactly what will be created or
   deleted (type, name, ID, account, region) plus the full commands, and get one yes per block. Read-only
   commands run freely. A "yes"/"go ahead" approves that block: run it, verify it, report, all in that turn.
-- **Passport API and CLI calls are yours.** Register the proxy, create and delete namespaces, resource groups,
-  references, endpoints and grants, and run `passport setup`/`whoami`/`request`/`daemon`/`ca status`
-  yourself. Don't ask permission and don't ask the user to run them; report what you did. The only Passport
-  steps for the human are browser approvals, `sudo` (`passport ca install`) and typing secret values.
+- **Passport API and CLI calls are yours when the developer chooses the agent path.** Create and delete
+  namespaces, resource groups, references, endpoints and grants, and run
+  `passport setup`/`whoami`/`request`/`daemon`/`ca status` yourself. In the local
+  setup, the developer creates the named proxy in the app and types its one-time
+  token in their own terminal; the proxy registers itself. If they choose the
+  app path for their own API, guide and verify instead of creating duplicates.
+  The AWS guide retains its existing agent-run registration flow.
 - **Secret references are encrypted for the team's *default* proxy.** Make yours the default while creating
   references, then restore the previous default (the guides show how). Never register as non-default and
   create references; they won't decrypt.
@@ -67,7 +74,7 @@ still waits until they say so.
   line, as a full `https://` URL with the confirmation code. Never ask for a secret's value in chat.
 - **Don't call it done early.** "An explicit curl works" is not "CLI and daemon fully configured"; report
   each check separately (AWS step 8.4, "Success checklist").
-- **Never print or paste secrets:** registry key, private keys, Vault tokens, login tokens, API credentials.
+- **Never print or paste secrets:** registry keys (AWS path), private keys, proxy or Vault tokens, login tokens, API credentials.
   Public keys, IDs and sha256s are fine; compare sha256s instead. Never print an API response that could
   contain a secret, and never put a secret in user-data, a commit, or chat.
 - **Never tear anything down** until the user explicitly says so.

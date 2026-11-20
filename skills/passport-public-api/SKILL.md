@@ -14,6 +14,19 @@ description: >
 ---
 # Passport public API
 
+## Choose the destination
+
+For an ordinary customer request use `app_url=https://app.usepassport.ai` and
+`api_url=https://api.usepassport.ai`. If the local `passport-setup` skill
+hands off an explicit alternate destination, read both values from
+`/tmp/pp-local/target.env`; if the file or either value is missing, stop.
+Before any API mutation, show the selected API host and the team from the
+active CLI session; an opaque API key does not reveal its team, so confirm
+its team in the selected app if there is no CLI session. Check both against
+the intended destination.
+Use `api_url` for every endpoint and `app_url` for browser links. An
+environment change never follows from a login alias alone.
+
 ## The one thing to get right
 
 **This API never returns a secret value, and it never makes the third-party call for you.**
@@ -73,13 +86,13 @@ Two things specific to this API once the proxy is up:
 
 ## Authenticate
 
-Base URL `https://api.usepassport.ai`, on every request:
+Base URL `api_url`, on every request:
 
 ```
 Authorization: Bearer sk_...
 ```
 
-The user creates this WorkOS key in the Passport app under **Organization → API keys**. This API
+The user creates this WorkOS key in the selected Passport app under **Organization → API keys**. This API
 cannot mint one. Do not have them paste it into the chat — ask them to expose it to your commands
 from wherever they keep it, and read it from the environment in any code you write. Revocation takes
 ~45s to propagate, so a revoked key may briefly still work.
@@ -175,7 +188,7 @@ A member key reads what an admin built and asks for access to it.
    config — `~/.passport/passportrc` holds a different id alongside live tokens, and reading it
    leaks them.
 
-3. Ask an admin to decide it, in the app at <https://app.usepassport.ai/approval-requests> or with
+3. Ask an admin to decide it, in the app at `<app_url>/approval-requests` or with
    an admin key (next section). Then poll
    `GET /public/v1/access-requests/{accessRequestId}` and watch `status`:
    `pending → approved | rejected`, or `cancelled` via

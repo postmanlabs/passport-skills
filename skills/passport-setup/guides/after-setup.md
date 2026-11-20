@@ -5,9 +5,11 @@ guide passes:
 - **Local Docker:** `guides/local-docker.md` step 7 printed `INJECTED`.
 - **AWS:** `guides/aws-single-instance.md` step 8.4 (success checklist) passed.
 
-It has two parts, run in order:
-1. **Handoff:** one short message that shows the value.
-2. **Add your own API:** offer this as the single next step.
+For **local Docker**, report each verified check, then point the developer to
+the app's **“See what was created”** step. After they inspect the demo, offer
+to add their own API either with the agent or in the app. For **AWS**, keep the
+existing handoff and offer to add an API. Never create duplicate objects when
+the developer uses the app.
 
 Cleanup stays in each setup guide, and runs only when the user explicitly asks.
 
@@ -19,7 +21,7 @@ The rest of this file uses the same names for both setups.
 
 ```bash
 cd /tmp/pp-local; . ./ids.env; W=/tmp/pp-local
-export PASSPORT_DIR=~/.passport                      # MDM Mac: ~/passport-cli-dl/.passport
+. ./target.env; export PASSPORT_API PASSPORT_DIR     # MDM Mac: set PASSPORT_DIR=~/passport-cli-dl/.passport
 api() { node /tmp/pp-local/passport-api.js "$@"; }
 PROXY=https://localhost:8443; MGMT=http://localhost:8081; DESTCA=/tmp/pp-local/proxy-ca.pem; D=$PASSPORT_DIR
 ```
@@ -50,21 +52,32 @@ PROXY=https://$PROXY_HOST:8443; MGMT=https://$CF_DOMAIN; DESTCA=/tmp/pp-aws/prox
 
 | Step | Local Docker | AWS |
 |---|---|---|
-| Store a secret at a hidden prompt | In your own terminal: `read -rs -p "Secret value: " V; echo; printf %s "$V" \| docker exec -i -e VAULT_ADDR=http://127.0.0.1:8200 -e VAULT_TOKEN=root-token-for-local-dev pp-vault-dev vault kv put secret/<vault-key> value=- >/dev/null && echo stored; unset V` | In your own terminal: `aws ssm start-session --target <INSTANCE> --region <AWS_REGION> --profile <AWS_PROFILE>`, then `sudo passport-vault-put <vault-key>`, then `exit` |
-| Check a stored value without printing it | `docker exec -e VAULT_ADDR=http://127.0.0.1:8200 -e VAULT_TOKEN=root-token-for-local-dev pp-vault-dev vault kv get -field=value secret/<vault-key> \| shasum -a 256` | in a session: `sudo passport-vault-sha256 <vault-key>` |
+| Store a secret at a hidden prompt | Give the developer `bash <absolute skill path>/scripts/local-vault-put.sh <vault-key>` on macOS/Linux or the PowerShell script below on Windows. They enter the value in their terminal. | In their terminal: `aws ssm start-session --target <INSTANCE> --region <AWS_REGION> --profile <AWS_PROFILE>`, then `sudo passport-vault-put <vault-key>`, then `exit` |
+| Check a stored value without printing it | Use the unique token from `/tmp/pp-local/vault-token` with `docker exec ... vault kv get -field=value secret/<vault-key> \| shasum -a 256`; do not print the value. | In a session: `sudo passport-vault-sha256 <vault-key>` |
 
 Both Vaults are dev mode and **in memory**. Restarting the Vault container
 erases every stored secret, so store them again afterwards.
+
+For Windows PowerShell, the developer runs
+`& "<absolute skill path>/scripts/local-vault-put.ps1" <vault-key>` instead.
+Both scripts prompt without echoing the value, read the restricted local Vault
+token file, and send the secret through standard input to the Vault CLI inside
+`pp-vault-dev`. The agent waits for “stored” and never receives the value.
 
 ---
 
 ## 1. Handoff: show the value, briefly (mandatory)
 
 One short message, with the real values. **Lead with the value**, and keep the
-details out unless the user asks. If any check in your setup guide failed, say
-which one first, in one line.
+details out unless the user asks. For local setup, report process readiness,
+Healthy registration, demo substitution, CLI request and daemon as separate
+checks; mark the daemon unverified unless its request ran successfully. If
+any check failed, say which one first.
 
-> **✅ Passport is working. You just called an API with a key you never had.**
+> **✅ The demo request used a key stored in local Vault.**
+> This is a public sample key, so the test proves substitution, not that the
+> agent could not know this particular value. For your own API, you enter the
+> secret yourself and I use only its reference.
 >
 > | | Without Passport | With Passport |
 > |---|---|---|
@@ -107,9 +120,12 @@ which one first, in one line.
 > `--proxy`, no certificate flags: the Passport daemon holds your certificate.
 > (If you see `"{{vau…",46`, the `export` lines didn't apply in that window.)
 >
-> **Try it on your own API?** Tell me the URL and how it takes the key (for
-> example `Authorization: Bearer`). You'll store the key yourself through a
-> hidden prompt, never in this chat, and I'll do the rest.
+> **Local:** Open **“See what was created”** in the Passport app to inspect
+> this demo. Then choose: “I can add your own API, or you can follow the
+> app's guided steps.” If I add it, tell me its URL and how it takes the key;
+> you'll enter the key in your terminal, not in chat.
+>
+> **AWS:** Want to try your own API? Tell me its URL and how it takes the key.
 >
 > <sub>Footer, one line: where it runs (local Docker, or proxy `<NAME>` on EC2 at about $0.70/day) · certificate renewal · "nothing is deleted until you ask".</sub>
 
@@ -141,7 +157,8 @@ Rules for this message:
   daemon is running. Otherwise show the explicit form you actually ran
   (`curl --proxy $PROXY … -H "x-demo-api-key: …" https://passport-demo…`), and
   say the daemon isn't set up. On an MDM Mac it never is.
-- **One next step:** their own API (part 2).
+- **One next step:** for local, inspect “See what was created,” then choose
+  agent or app for their own API; for AWS, offer their own API (part 2).
 - **Be honest about the demo key.** It's the demo API's public sample key, so it
   appears in the guides. With their own key, the value goes only into a hidden
   prompt, and never into their shell history or this conversation. Say so if
@@ -170,6 +187,16 @@ new link marked:
 
 ## 2. Add your own API (call a real API through Passport)
 
+For **local Docker**, first ask whether the developer wants the agent to add
+the API or prefers the app's **“Add your own API”** flow. If they choose the
+app, guide its access group → API/resource group → endpoint → secret mapping
+→ access steps. The developer still stores the value in local Vault with the
+part-0 hidden-prompt command; the app stores only its Vault path. Then inspect
+the created objects and verify a request; do not run the create calls below.
+Either path must use an existing **non-demo** access group or create one.
+The demo namespace is excluded from the app's own-API progress. The agent
+path below is also used for AWS, without changing its deployment steps.
+
 ### 2.1 Ask for three things (never the secret value)
 
 | Input | Example |
@@ -196,9 +223,10 @@ as they are.
 ### 2.3 The sequence
 
 **1. [you] Store the secret value** with the hidden-prompt command for your
-setup (part 0 table). It never appears in chat, shell history or a process
-list. Wait for "done". First remind them that this is a demo: the Vault is
-dev mode and in memory, so use a test or low-risk credential.
+setup (part 0 table). It never appears in chat or shell history. Wait for
+“stored”. The Vault is dev mode and in memory, so use a test or low-risk
+credential. On local Docker, the developer runs the script in their terminal;
+the agent never receives the value.
 
 **2. The agent creates the Passport objects itself**, without asking. Fill in
 the first line:
@@ -206,19 +234,32 @@ the first line:
 ```bash
 EP_METHOD=GET; EP_HOST=api.github.com; EP_PATH=/user; VKEY=github-token; HDR=Authorization
 # … then your part-0 load block …
+set -o pipefail
 PP_USER=$(node -e 'const fs=require("fs"),p=require("path");const t=JSON.parse(fs.readFileSync(p.join(process.env.PASSPORT_DIR,"passportrc"),"utf8")).login._profiles[0].workos.accessToken;console.log(JSON.parse(Buffer.from(t.split(".")[1],"base64url")).sub)')
-RG_N=$(api POST /api/v1/namespaces/$NS/resource-groups "$(jq -nc --arg n "$EP_HOST" '{name:$n,description:"Added after e2e",source:"manual"}')" | jq -r .body.data.id)
+# Local: list access groups and choose a non-demo one, or create one named for the project.
+# AWS: preserve the original flow by using its demo namespace.
+if [ "$W" = /tmp/pp-local ]; then
+  api GET /api/v1/namespaces
+  NS_N=$(api POST /api/v1/namespaces '{"name":"<project-access-group>","description":"Developer API"}' | jq -er .body.data.id) || exit 1
+  NS_CREATED=1                     # if reusing a non-demo group: set its ID and NS_CREATED=0
+else
+  NS_N=$NS; NS_CREATED=0
+fi
+RG_N=$(api POST /api/v1/namespaces/$NS_N/resource-groups "$(jq -nc --arg n "$EP_HOST" '{name:$n,description:"Added after e2e",source:"manual"}')" | jq -er .body.data.id) || exit 1
 # References are encrypted for the team's DEFAULT proxy: be the default while creating it, then restore.
 PREV=$(api GET /api/v2/tenant/config | jq -r '[.body.data[]|select(.isDefault==true)][0].proxyId // empty')
-[ "$PREV" != "$PROXY_ID" ] && api PUT /api/v2/tenant/config/$PROXY_ID '{"isDefault":true}' >/dev/null
-REF_N=$(api POST /api/v2/secret-references "$(jq -nc --arg ns "$NS" --arg k "$VKEY" '{namespaceId:$ns,name:$k,vaultType:"hashicorp",vaultKey:$k}')" | jq -r .body.data.id)
-[ -n "$PREV" ] && [ "$PREV" != "$PROXY_ID" ] && api PUT /api/v2/tenant/config/$PREV '{"isDefault":true}' >/dev/null
-EP_N=$(api POST /api/v2/resource-endpoints "$(jq -nc --arg ns "$NS" --arg m "$EP_METHOD" --arg h "$EP_HOST" --arg p "$EP_PATH" --arg l "$HDR" --arg r "$REF_N" --arg g "$RG_N" \
-  '{namespaceId:$ns,method:$m,host:$h,path:$p,secrets:[{label:$l,secretReferenceId:$r}],resourceGroupIds:[$g]}')" | jq -r .body.data.id)
-GR_N=$(api POST /api/v2/access-grants "$(jq -nc --arg u "$PP_USER" --arg ns "$NS" --arg e "$EP_N" '{userId:$u,namespaceId:$ns,endpointIds:[$e],reason:"passport extra resource",validity:1}')" | jq -r '.body.data[0].id')
-OK=1; for v in "$RG_N" "$REF_N" "$EP_N" "$GR_N"; do case "$v" in ''|null) OK=;; esac; done   # a failed call gives "" or "null"
+[ "$PREV" = "$PROXY_ID" ] || api PUT /api/v2/tenant/config/$PROXY_ID '{"isDefault":true}' >/dev/null || exit 1
+REF_RESPONSE=$(api POST /api/v2/secret-references "$(jq -nc --arg ns "$NS_N" --arg k "$VKEY" '{namespaceId:$ns,name:$k,vaultType:"hashicorp",vaultKey:$k}')")
+REF_STATUS=$?
+[ -z "$PREV" ] || [ "$PREV" = "$PROXY_ID" ] || api PUT /api/v2/tenant/config/$PREV '{"isDefault":true}' >/dev/null || exit 1
+[ "$REF_STATUS" -eq 0 ] || { echo 'Reference creation failed; previous default restored.' >&2; exit 1; }
+REF_N=$(printf '%s' "$REF_RESPONSE" | jq -er .body.data.id) || exit 1
+EP_N=$(api POST /api/v2/resource-endpoints "$(jq -nc --arg ns "$NS_N" --arg m "$EP_METHOD" --arg h "$EP_HOST" --arg p "$EP_PATH" --arg l "$HDR" --arg r "$REF_N" --arg g "$RG_N" \
+  '{namespaceId:$ns,method:$m,host:$h,path:$p,secrets:[{label:$l,secretReferenceId:$r}],resourceGroupIds:[$g]}')" | jq -er .body.data.id) || exit 1
+GR_N=$(api POST /api/v2/access-grants "$(jq -nc --arg u "$PP_USER" --arg ns "$NS_N" --arg e "$EP_N" '{userId:$u,namespaceId:$ns,endpointIds:[$e],reason:"passport extra resource",validity:1}')" | jq -er '.body.data[0].id') || exit 1
+OK=1; for v in "$NS_N" "$RG_N" "$REF_N" "$EP_N" "$GR_N"; do case "$v" in ''|null) OK=;; esac; done
 if [ -n "$OK" ]; then
-  printf '%s RG=%s REF=%s EP=%s GR=%s\n' "$EP_METHOD $EP_HOST$EP_PATH" $RG_N $REF_N $EP_N $GR_N | tee -a $W/resources.env
+  printf '%s NS_N=%s NS_CREATED=%s RG=%s REF=%s EP=%s GR=%s\n' "$EP_METHOD $EP_HOST$EP_PATH" "$NS_N" "$NS_CREATED" "$RG_N" "$REF_N" "$EP_N" "$GR_N" | tee -a $W/resources.env
 else echo "INCOMPLETE: RG=$RG_N REF=$REF_N EP=$EP_N GR=$GR_N. Nothing recorded; delete any IDs shown, refresh the token, re-run" >&2; fi
 ```
 
@@ -249,8 +290,9 @@ curl -sS --proxy $PROXY \
   "https://api.github.com/user"
 ```
 
-- **Success:** a 2xx from the API means the proxy injected the real credential.
-  Don't print the body if it could echo the credential back.
+- **Success:** verify the upstream performed an operation that requires the
+  credential; a 2xx alone does not prove substitution if that API also allows
+  anonymous requests. Do not print a body that could echo the credential.
 - **Credential in a query parameter?** Add `-g`. Without it, curl reads `{{` as
   its own URL-glob syntax and fails with `nested brace in URL`:
   `curl -sS -g … "https://api.example.com/v1/items?api_key={{vault:<REF_N>}}"`.
@@ -280,3 +322,8 @@ curl -sS -H "Authorization: Bearer {{vault:<REF_N>}}" "https://api.github.com/us
 
 What has been verified for this part, and what hasn't:
 `guides/reference/verification.md`.
+
+For **local Docker**, after the developer's own API request is verified, ask
+them to tick **“My request went through and the API received the real key”**
+in the app. The earlier demo request does not count. Report whether the app
+actually reflected the completion; do not infer it from the API response.

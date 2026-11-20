@@ -37,8 +37,10 @@
 
 | Symptom | Cause / fix |
 |---|---|
-| `docker login ociregistry.usepassport.ai` fails, or you have no registry key | Create one at <https://app.usepassport.ai/org/registry> (Org Settings → Registry; needs admin, and a team must exist), or ask your team admin. Nothing past local 2 works without it. |
+| Anonymous `docker pull` fails in local step 2 | Verify the public ECR digest and network access. Do not request a private registry key. |
 | `docker: Cannot connect to the Docker daemon` | Docker isn't running. Start Docker Desktop. |
+| Existing `pp-vault-dev` cannot be reused | Do not delete it: restarting this dev Vault erases secrets. Check its health and `/tmp/pp-local/vault-token`, or ask the developer before replacing it. |
+| Proxy process is ready but the app says Not connected | `/readyz` does not prove registration. Check `docker logs pp-proxy-local` for token, control-plane URL or KEK errors; do not create references until the app says Healthy. |
 | Proxy container exits immediately | `docker logs pp-proxy-local` shows the real error. |
 | `curl: (77) error setting certificate verify locations` | You used `/tmp/pp-local/ca.pem` as a CA certificate. It's a private key. Fetch the proxy's CA certificate: `curl http://localhost:8081/ca.pem`. |
 | `bind: address already in use` when restarting the proxy | The old container is still running. `docker rm -f pp-proxy-local`, then run local 4.4 again. |
