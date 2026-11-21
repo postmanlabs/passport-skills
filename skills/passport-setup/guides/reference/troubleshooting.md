@@ -25,7 +25,7 @@
 |---|---|
 | `not authorized for vault refs: [...]` though `whoami` shows the grant | The endpoint `host` was registered **with** a port. Re-create it with a bare hostname, recreate the grant, and run `passport setup` again. |
 | The demo API shows `"key":"{{vau…"` / `"key_length":46` (the pointer arrived unchanged) | The request didn't go through the proxy (daemon form in an old terminal without `HTTPS_PROXY`, or a `NO_PROXY` host), or you used the reference's name instead of its UUID. |
-| `failed to decrypt vault reference: <uuid>` | The reference was encrypted for a different proxy: the team's **default** registration when it was created, or an earlier registration of yours with another key. Repair it as in `concepts.md`, "Secret references are encrypted for the team's default proxy". |
+| `failed to decrypt vault reference: <uuid>` | The reference was encrypted for a different proxy: the namespace zone's **default** registration when it was created, or an earlier registration of yours with another key. Repair it as in `concepts.md`, "Secret references are encrypted for the zone's default proxy". |
 | Secret not found, or the injected value is empty | The Vault lost it (dev mode, in memory: a restart erases every value), or the key is wrong. `vaultKey` is relative to `secret/` (`demo-api-key`, not `secret/data/demo-api-key`) and the field must be `value`. Store it again: local, the hidden-prompt command in `after-setup.md` part 0; AWS, `sudo passport-vault-put <key>` in a session (or step 6's demo line). |
 | `hashicorp vault: VAULT_ADDR is required` / `VAULT_TOKEN is required` | These are plain Vault variable names, not `PASSPORT_PROXY_`-prefixed. Local: check the `-e` flags of 4.4. AWS: `/opt/passport/vault.env` is missing or wasn't passed with `--env-file`; have the user re-run `sudo passport-start-proxy`. |
 | `/issue-cert` fails with `unknown kid "acs-bundle-…"` | `PASSPORT_PROXY_JWKS_URL` must be the bundle issuer's JWKS, `https://api.usepassport.ai/api/v1/bundles/.well-known/jwks.json`, not WorkOS's SSO JWKS. |
@@ -37,8 +37,10 @@
 
 | Symptom | Cause / fix |
 |---|---|
-| `docker login ociregistry.usepassport.ai` fails, or you have no registry key | Create one at <https://app.usepassport.ai/org/registry> (Org Settings → Registry; needs admin, and a team must exist), or ask your team admin. Nothing past local 2 works without it. |
+| Anonymous `docker pull` fails in local step 2 | Verify the public ECR digest and network access. Do not request a private registry key. |
 | `docker: Cannot connect to the Docker daemon` | Docker isn't running. Start Docker Desktop. |
+| Existing `pp-vault-dev` cannot be reused | Do not delete it: restarting this dev Vault erases secrets. Check its health and `/tmp/pp-local/vault-token`, or ask the developer before replacing it. |
+| Proxy process is ready but the app says Not connected | `/readyz` does not prove registration. Check `docker logs pp-proxy-local` for token, control-plane URL or KEK errors; do not create references until the app says Healthy. |
 | Proxy container exits immediately | `docker logs pp-proxy-local` shows the real error. |
 | `curl: (77) error setting certificate verify locations` | You used `/tmp/pp-local/ca.pem` as a CA certificate. It's a private key. Fetch the proxy's CA certificate: `curl http://localhost:8081/ca.pem`. |
 | `bind: address already in use` when restarting the proxy | The old container is still running. `docker rm -f pp-proxy-local`, then run local 4.4 again. |

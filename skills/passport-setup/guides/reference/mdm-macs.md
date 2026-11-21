@@ -46,7 +46,7 @@ or calls the API:**
 
 - **AWS:** `st MDM 1; st PASSPORT_DIR ~/passport-cli-dl/.passport`. From then
   on `cli` runs in the container and `api` reads the container's login.
-- **Local:** start every block that uses `api` (local 5.4, `after-setup.md`
+- **Local:** start every block that uses `api` (local step 5, `after-setup.md`
   part 0) with `export PASSPORT_DIR=~/passport-cli-dl/.passport`.
 
 Then do A.1–A.3 in place of the host login.
@@ -65,6 +65,10 @@ mkdir -p ~/passport-cli-dl
 docker run --rm -v ~/passport-cli-dl:/cli node:20 sh -c \
   'curl -fsSL "https://dl-passport.pstmn.io/install/enterprise/unix.sh" | sh && cp -R /usr/local/bin/passport /usr/local/bin/lib /cli/'
 ```
+
+For **local Docker**, substitute the selected
+`<cli_download_base_url>/unix.sh` from `guides/local-docker.md` in this
+command. The AWS path keeps the production URL above.
 
 If `~/passport-cli-dl` already has a `passport`, this replaces it (keep
 `.passport/`, the login). Use the full Passport CLI here.
@@ -100,6 +104,9 @@ sleep 3
 docker exec pp-cli-linux cat /cli/login.log
 ```
 
+For **local Docker**, use `./passport login --no-setup` in that command. The
+AWS path keeps its existing login command.
+
 The log prints a confirmation code and a URL. The final browser redirect goes
 to `http://127.0.0.1:<port>/auth/callback?…`, a random port that only exists
 inside the container. The Mac's browser can't reach it, even with
@@ -132,10 +139,10 @@ Stop the forwarder: `pkill -f cb-forward.js`.
   new port, so re-run the forwarder block.
 - **Link expired?** Recreate the container (A.2), run `login` again, restart
   the forwarder, and have the user approve promptly.
-- **Expected after login:** `Error: No Passport proxy is configured for your
-  team` / `Login succeeded, but Passport credentials were not refreshed.`
-  Login's auto-setup ran before a proxy was registered. Nothing is wrong; A.4's
-  `setup` fixes it.
+- **Local after login:** `--no-setup` leaves proxy setup pending until A.4.
+  **AWS after login:** `Error: No Passport proxy is configured for your team`
+  can occur because login's automatic setup ran before registration; A.4
+  fixes it.
 - **Manual fallback** if the forwarder can't run: the user copies the failed
   `http://127.0.0.1:<port>/auth/callback?…` URL from the browser's address bar,
   and you run `docker exec pp-cli-linux curl -s "<that URL>"`.
@@ -148,6 +155,11 @@ Stop the forwarder: `pkill -f cb-forward.js`.
 ### A.4 Setup and test
 
 **Local Docker** (replaces local 6 and the CLI parts of 7):
+
+The container CLI uses `localhost:8443` and `localhost:8081` to reach the
+same proxy and management server that the host uses at
+`passport-proxy.localhost` and `passport-management.localhost` when the aliases
+are available.
 
 ```bash
 docker exec -e PASSPORT_DIR=/cli/.passport pp-cli-linux ./passport setup \

@@ -30,6 +30,17 @@ something, and keep "Not verified yet" honest.
 
 ## Not verified yet
 
+- **The new local token-registration flow end to end.** On 2026-11-20 an
+  anonymous registry request showed `latest` and `v0.11.0` both resolve to
+  `sha256:a4fa458d63817e70410fae9513f0a73725f43f20ffc2cb4fe2f62f027c3d7017`.
+  This older image does not implement token registration. The local guide
+  assumes `latest` will include that feature before publication. The app,
+  service, schema, gateway and new image still need a joint test.
+- The redesigned app's final **Proxy settings** and **Access groups** click
+  path. The test account still showed older labels and manual proxy
+  creation on 2026-11-20.
+- The new PowerShell local Vault secret-entry script on Windows.
+
 - Claude Code's `/plugin install passport --marketplace …` slash command (only
   its argument parser was read; the two-step form above was run).
 - Cursor in the running IDE: the "Import from GitHub" marketplace flow (read
