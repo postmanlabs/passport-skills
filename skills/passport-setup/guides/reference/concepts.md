@@ -19,17 +19,18 @@ The proxy checks every link before it swaps the pointer for the real value.
 A **team** and an **org** are the same thing: the team ID is the `org_…` value
 on the `org` line of `passport auth status`.
 
-## Secret references are encrypted for the team's default proxy
+## Secret references are encrypted for the zone's default proxy
 
 *Verified in `passport-service` and in a live run on 2026-10-07.*
 
 - Passport encrypts each new secret reference with the public key of the
-  team's **default** proxy registration. If there's no default, it uses an
-  arbitrary registration. Nothing in the request chooses the proxy.
+  **default proxy in its namespace's zone**. If there's no default, it uses
+  another eligible proxy in that zone. Nothing in the request chooses the proxy.
 - The key is fixed when the reference is created. A reference created while
   another proxy is the default can't be decrypted by yours
   (`failed to decrypt vault reference: <uuid>`).
-- So, on a team that already has a default:
+- The local guide expects one Healthy default proxy in the zone and stops if
+  another proxy is present. On the AWS path, if the zone already has a default:
   1. remember the current default;
   2. make your proxy the default;
   3. create your references;

@@ -156,6 +156,11 @@ Stop the forwarder: `pkill -f cb-forward.js`.
 
 **Local Docker** (replaces local 6 and the CLI parts of 7):
 
+The container CLI uses `localhost:8443` and `localhost:8081` to reach the
+same proxy and management server that the host uses at
+`passport-proxy.localhost` and `passport-management.localhost` when the aliases
+are available.
+
 ```bash
 docker exec -e PASSPORT_DIR=/cli/.passport pp-cli-linux ./passport setup \
   --management-url http://localhost:8081 --proxy-url https://localhost:8443 --no-daemon

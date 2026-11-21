@@ -87,7 +87,7 @@ each command runs in a fresh shell.
 - A Passport account and team; open `<app_url>/signup?origin=agent` for a new
   account, or open the selected `app_url` to sign in. The agent reads
   `APP_URL` from `target.env` and gives the developer the full link.
-- `openssl`, `curl`, `jq` (all preinstalled on macOS; `jq` may need `brew install jq`).
+- `openssl`, `curl`, `jq`, `node` (`jq` and `node` may need installation).
 
 ---
 
@@ -252,6 +252,9 @@ openssl rsa -in /tmp/pp-local/ref.pem -pubout -out /tmp/pp-local/reference-publi
 
 ### 4.2 Create the named proxy in the app
 
+Check **Proxy settings** first. A fresh signup should have no proxy. If one
+already exists, stop and inspect it; do not create another.
+
 The developer opens **Proxy settings → Add proxy** in `<app_url>` and chooses a
 unique name such as `passport-local-<your-name>`. The app shows its one-time
 setup token. Keep that view open; do not paste the token into chat. If the
@@ -264,7 +267,26 @@ Read the `org_...` team ID from `passport auth status` with the selected
 also supplies a bundle issuer and, sometimes, an audience. Use those exact
 non-secret values in the command below; omit the audience flag when it is
 null. The app's proxy URL and management URL for local Docker are
-`https://localhost:8443` and `http://localhost:8081`.
+`https://passport-proxy.localhost` and `http://passport-management.localhost`.
+The proxy still listens on ports 8443 and 8081 inside Docker; host ports 443
+and 80 give both URLs names without ports. Before starting, check that both
+names resolve to loopback and that host ports 443 and 80 are free. Do not edit
+`/etc/hosts`. If either check fails, use `https://localhost:8443` and
+`http://localhost:8081` consistently for the public URLs, `passport setup`,
+and the test requests; omit both 443 and 80 port mappings below.
+
+```bash
+node - <<'NODE'
+for (const host of ['passport-proxy.localhost', 'passport-management.localhost']) {
+  require('node:dns').lookup(host, { all: true }, (error, addresses) => {
+    if (error || !addresses.some(({ address }) => address === '127.0.0.1')) {
+      console.error(`${host} does not resolve to loopback`);
+      process.exitCode = 1;
+    }
+  });
+}
+NODE
+```
 
 ### 4.3 Start the container
 
@@ -284,17 +306,18 @@ start_passport_proxy() {
   VAULT_TOKEN=$(cat /tmp/pp-local/vault-token) || return 1
   export PASSPORT_PROXY_TOKEN VAULT_TOKEN
   docker run -d --name pp-proxy-local --network pp-net \
+    -p 127.0.0.1:443:8443 -p 127.0.0.1:80:8081 \
     -p 8443:8443 -p 8081:8081 -v /tmp/pp-local:/tmp/pp-local \
     -e PASSPORT_PROXY_TOKEN -e PASSPORT_CONTROL_PLANE_URL="$PASSPORT_API" \
-    -e PASSPORT_PROXY_PUBLIC_URL=https://localhost:8443 \
-    -e PASSPORT_PROXY_PUBLIC_MANAGEMENT_URL=http://localhost:8081 \
+    -e PASSPORT_PROXY_PUBLIC_URL=https://passport-proxy.localhost \
+    -e PASSPORT_PROXY_PUBLIC_MANAGEMENT_URL=http://passport-management.localhost \
     -e PASSPORT_PROXY_PRIVATE_KEY_PATH=/tmp/pp-local/ca.pem \
     -e PASSPORT_PROXY_REFERENCE_PRIVATE_KEY_PATH=/tmp/pp-local/ref.pem \
     -e PASSPORT_PROXY_JWKS_URL="$PASSPORT_API/api/v1/bundles/.well-known/jwks.json" \
     -e PASSPORT_PROXY_BUNDLE_ISSUER=<issuer-from-app> \
     -e PASSPORT_PROXY_ALLOWED_TEAM_IDS=<org-id-from-cli> \
     -e PASSPORT_PROXY_AUDIT_SINK=stdout \
-    -e PASSPORT_PROXY_DATAPLANE_CERT_SANS=localhost \
+    -e PASSPORT_PROXY_DATAPLANE_CERT_SANS=localhost,passport-proxy.localhost \
     -e PASSPORT_PROXY_VAULT_SOURCE=hashicorp \
     -e VAULT_ADDR=http://pp-vault-dev:8200 -e VAULT_TOKEN \
     "$PROXY_IMAGE_REF"
@@ -324,8 +347,8 @@ do not report that platform as tested.
 ### 4.4 Verify it booted and registered
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8081/knockknock   # expect 200
-curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8081/readyz      # expect 200
+curl -s -o /dev/null -w "%{http_code}\n" http://passport-management.localhost/knockknock   # expect 200
+curl -s -o /dev/null -w "%{http_code}\n" http://passport-management.localhost/readyz      # expect 200
 docker logs pp-proxy-local 2>&1 | tail -30      # inspect errors; never paste a token into chat
 ```
 
@@ -340,9 +363,9 @@ registration error and stop before creating references.
 
 The agent creates the demo through `<api_url>` after the proxy is **Healthy**.
 The app calls its access group a **namespace** in API paths. Use a bare host
-without a port. The reference is encrypted for the team's **default** proxy,
-so make the registered local proxy default only while creating the reference,
-then restore the earlier default. Details: `guides/reference/concepts.md`.
+without a port. The reference is encrypted for the zone's **default** proxy.
+For this local flow, the named proxy must be the zone's only proxy and its
+default; stop if another proxy is present. Details: `guides/reference/concepts.md`.
 
 The CLI session authenticates these calls. The token is read from `passportrc`
 and never printed. On an MDM Mac, set
@@ -362,31 +385,23 @@ cd /tmp/pp-local
 PROXY_NAME='<exact name created in the app>'
 PROXY_LIST=$(api GET /api/v2/tenant/config) || exit 1
 PROXY_ID=$(printf '%s' "$PROXY_LIST" | jq -er --arg n "$PROXY_NAME" \
-  '[.body.data[] | select(.proxyName==$n and .status=="healthy" and (.publicKey // "") != "")]
-   | if length==1 then .[0].proxyId else error("expected one Healthy proxy with this name") end') || exit 1
+  '.body.data as $p | if ($p|length)==1 and $p[0].proxyName==$n and
+   $p[0].status=="healthy" and $p[0].isDefault==true and
+   ($p[0].publicKey // "")!="" then $p[0].proxyId
+   else error("expected one Healthy default proxy with this name") end') || exit 1
 WANT=$(openssl pkey -pubin -in reference-public-key.pem -outform DER | openssl dgst -sha256 | awk '{print $NF}')
 GOT=$(printf '%s' "$PROXY_LIST" | jq -r --arg p "$PROXY_ID" \
   '.body.data[] | select(.proxyId==$p).publicKey' | openssl pkey -pubin -outform DER | openssl dgst -sha256 | awk '{print $NF}')
 [ "$WANT" = "$GOT" ] || { echo 'Registered key differs from local ref.pem; stop.' >&2; exit 1; }
-PREV_DEFAULT=$(printf '%s' "$PROXY_LIST" | jq -r '[.body.data[]|select(.isDefault==true)][0].proxyId // empty')
-
 # Create the demo in its own namespace; do not reuse it for the developer's API.
 PP_USER=$(node -e 'const fs=require("fs"),os=require("os"),p=require("path");const rc=JSON.parse(fs.readFileSync(p.join(process.env.PASSPORT_DIR||p.join(os.homedir(),".passport"),"passportrc"),"utf8"));console.log(JSON.parse(Buffer.from(rc.login._profiles[0].workos.accessToken.split(".")[1],"base64url")).sub)')
 NS=$(api POST /api/v1/namespaces '{"name":"passport-proxy-local-dev-e2e","description":"Passport proxy e2e test"}' | jq -er '.body.data.id') || exit 1
 RG=$(api POST /api/v1/namespaces/$NS/resource-groups '{"name":"passport-demo.mock.postman.postman.dev","description":"Passport proxy e2e test","source":"manual"}' | jq -er '.body.data.id') || exit 1
-if [ -n "$PREV_DEFAULT" ] && [ "$PREV_DEFAULT" != "$PROXY_ID" ]; then
-  api PUT /api/v2/tenant/config/$PROXY_ID '{"isDefault":true}' >/dev/null || exit 1
-fi
-REF_RESPONSE=$(api POST /api/v2/secret-references "$(jq -nc --arg ns "$NS" '{namespaceId:$ns,name:"demo",vaultType:"hashicorp",vaultKey:"demo-api-key"}')")
-REF_STATUS=$?
-[ -z "$PREV_DEFAULT" ] || [ "$PREV_DEFAULT" = "$PROXY_ID" ] ||
-  api PUT /api/v2/tenant/config/$PREV_DEFAULT '{"isDefault":true}' >/dev/null || exit 1
-[ "$REF_STATUS" -eq 0 ] || { echo 'Reference creation failed; previous default restored.' >&2; exit 1; }
-REF=$(printf '%s' "$REF_RESPONSE" | jq -er '.body.data.id') || exit 1
+REF=$(api POST /api/v2/secret-references "$(jq -nc --arg ns "$NS" '{namespaceId:$ns,name:"demo",vaultType:"hashicorp",vaultKey:"demo-api-key"}')" | jq -er '.body.data.id') || exit 1
 EP=$(api POST /api/v2/resource-endpoints "$(jq -nc --arg ns "$NS" --arg r "$REF" --arg g "$RG" '{namespaceId:$ns,method:"GET",host:"passport-demo.mock.postman.postman.dev",path:"/",secrets:[{label:"x-demo-api-key",secretReferenceId:$r}],resourceGroupIds:[$g]}')" | jq -er '.body.data.id') || exit 1
 GR=$(api POST /api/v2/access-grants "$(jq -nc --arg u "$PP_USER" --arg ns "$NS" --arg e "$EP" '{userId:$u,namespaceId:$ns,endpointIds:[$e],reason:"passport proxy local e2e",validity:1}')" | jq -er '.body.data[0].id') || exit 1
 MISSING=; for v in PROXY_ID NS RG REF EP GR; do eval "x=\${$v:-}"; case "$x" in ''|null) MISSING="$MISSING $v";; esac; done
-if [ -z "$MISSING" ]; then printf 'PROXY_ID=%s\nPREV_DEFAULT=%s\nNS=%s\nRG=%s\nREF=%s\nEP=%s\nGR=%s\n' $PROXY_ID "$PREV_DEFAULT" $NS $RG $REF $EP $GR | tee ids.env
+if [ -z "$MISSING" ]; then printf 'PROXY_ID=%s\nNS=%s\nRG=%s\nREF=%s\nEP=%s\nGR=%s\n' "$PROXY_ID" "$NS" "$RG" "$REF" "$EP" "$GR" | tee ids.env
 else echo "INCOMPLETE, missing:$MISSING. Delete any IDs that were created, run 'passport auth status' (refreshes the token), re-run." >&2; fi
 ```
 
@@ -403,7 +418,7 @@ delete the named proxy merely because the demo test ended.
 
 ```bash
 . /tmp/pp-local/target.env; export PASSPORT_DIR
-passport setup --management-url http://localhost:8081 --proxy-url https://localhost:8443
+passport setup --management-url http://passport-management.localhost --proxy-url https://passport-proxy.localhost
 ```
 
 Sanity-check what got embedded in your issued cert:
@@ -435,8 +450,8 @@ what it saw:
 . /tmp/pp-local/target.env; export PASSPORT_DIR
 source /tmp/pp-local/ids.env                         # gives $REF (step 5), or take the UUID from `passport whoami`
 D=$PASSPORT_DIR                                      # MDM: ~/passport-cli-dl/.passport
-curl -s http://localhost:8081/ca.pem -o /tmp/pp-local/proxy-ca.pem
-R=$(curl -sS --proxy https://localhost:8443 \
+curl -s http://passport-management.localhost/ca.pem -o /tmp/pp-local/proxy-ca.pem
+R=$(curl -sS --proxy https://passport-proxy.localhost \
   --proxy-cacert $D/ca.pem --proxy-cert $D/cert.pem --proxy-key $D/key.pem \
   --cacert /tmp/pp-local/proxy-ca.pem \
   -H "x-demo-api-key: {{vault:$REF}}" \

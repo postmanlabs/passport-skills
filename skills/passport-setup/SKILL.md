@@ -1,6 +1,6 @@
 ---
 name: passport-setup
-description: Set up and verify a Postman Passport proxy end to end, either locally in Docker or on a single AWS EC2 instance with CloudFront. Use when asked to "setup passport", set up or deploy a Passport proxy, or run Passport locally/on AWS. Once a proxy is running, the companion passport-public-api skill registers APIs and manages credentials (secret references, bindings, access requests) programmatically via the Passport public API.
+description: Set up and verify Postman Passport for one developer on their machine (local Docker) or for a team (AWS EC2 with CloudFront). Use when asked to set up Passport locally or for a team. Once a proxy is running, the companion passport-public-api skill registers APIs and manages credentials (secret references, bindings, access requests) through the Passport public API.
 ---
 
 # Passport setup — instructions for AI coding agents
@@ -40,11 +40,11 @@ Everything after the e2e test is in **`guides/after-setup.md`** (shared by both 
    - their own script or SDK, via the daemon env vars;
    - an AI agent calling an API without holding the key;
    - more endpoints for a teammate;
-   - **registering APIs, secret references, access requests, or binding credentials
-     programmatically** — for their own code or agents, or in bulk — with the **`passport-public-api`**
-     skill, which drives the Passport public API (`api.usepassport.ai`). Point them there whenever the
-     task is about *using* credentials in code rather than a one-off demo call; the manual flow in
-     `guides/after-setup.md` part 2 is the by-hand equivalent.
+   - **ongoing API and access work** — use the **`passport-public-api`** skill
+     when they want the agent to register more APIs, manage secret references,
+     access requests, or credential bindings. It uses the selected app and API
+     destination. The first own-API walkthrough remains in
+     `guides/after-setup.md` part 2.
 
 Keep it concrete: use their real host, path and reference UUIDs, and say what each result proves
 in one plain sentence. Don't oversell: only claim what the step you ran just showed. Cleanup
@@ -65,9 +65,10 @@ still waits until they say so.
   token in their own terminal; the proxy registers itself. If they choose the
   app path for their own API, guide and verify instead of creating duplicates.
   The AWS guide retains its existing agent-run registration flow.
-- **Secret references are encrypted for the team's *default* proxy.** Make yours the default while creating
-  references, then restore the previous default (the guides show how). Never register as non-default and
-  create references; they won't decrypt.
+- **Create references for the right proxy.** Passport encrypts each new
+  reference for the default proxy in its zone. In the local flow, confirm the
+  named proxy is that zone's only proxy and is default; stop if it is not.
+  The AWS guide handles its existing default-proxy procedure separately.
 - **The human types into their own terminal.** You can't type into theirs and they can't type into yours.
   For anything needing sudo, a password, a browser or a secret value: give the exact commands in a code
   block, say what they should see, wait for "done", then verify it yourself. Show login links on their own

@@ -39,7 +39,7 @@ PROXY=https://$PROXY_HOST:8443; MGMT=https://$CF_DOMAIN; DESTCA=/tmp/pp-aws/prox
 | `$MGMT` | the management URL, used with `passport setup --management-url` |
 | `$DESTCA` | the proxy's CA as downloaded in your setup guide, used with `--cacert` |
 | `$D` | the CLI's credentials folder: `cert.pem`, `key.pem`, `ca.pem` |
-| `$NS`, `$PROXY_ID`, `$REF`, `$GR`, `$PREV_DEFAULT` | IDs from your setup guide's demo (namespace, registration, demo reference, demo grant, the team's previous default) |
+| `$NS`, `$PROXY_ID`, `$REF`, `$GR` | IDs from the demo (namespace, proxy, secret reference, grant); `$PREV_DEFAULT` is used only by the AWS guide |
 | `$W/resources.env` | one line per API added in part 2, which cleanup reads |
 
 **Refresh your certificate** after any grant change:
@@ -193,6 +193,8 @@ app, guide its access group → API/resource group → endpoint → secret mappi
 → access steps. The developer still stores the value in local Vault with the
 part-0 hidden-prompt command; the app stores only its Vault path. Then inspect
 the created objects and verify a request; do not run the create calls below.
+Before either path, confirm the named proxy is still the zone's only proxy
+and its default; stop if that is no longer true.
 Either path must use an existing **non-demo** access group or create one.
 The demo namespace is excluded from the app's own-API progress. The agent
 path below is also used for AWS, without changing its deployment steps.
@@ -246,13 +248,21 @@ else
   NS_N=$NS; NS_CREATED=0
 fi
 RG_N=$(api POST /api/v1/namespaces/$NS_N/resource-groups "$(jq -nc --arg n "$EP_HOST" '{name:$n,description:"Added after e2e",source:"manual"}')" | jq -er .body.data.id) || exit 1
-# References are encrypted for the team's DEFAULT proxy: be the default while creating it, then restore.
-PREV=$(api GET /api/v2/tenant/config | jq -r '[.body.data[]|select(.isDefault==true)][0].proxyId // empty')
-[ "$PREV" = "$PROXY_ID" ] || api PUT /api/v2/tenant/config/$PROXY_ID '{"isDefault":true}' >/dev/null || exit 1
+PROXIES=$(api GET /api/v2/tenant/config) || exit 1
+if [ "$W" = /tmp/pp-local ]; then
+  printf '%s' "$PROXIES" | jq -e --arg p "$PROXY_ID" \
+    '(.body.data | length)==1 and .body.data[0].proxyId==$p and .body.data[0].isDefault==true' >/dev/null || exit 1
+else
+  # AWS retains the existing default-proxy procedure.
+  PREV=$(printf '%s' "$PROXIES" | jq -r '[.body.data[]|select(.isDefault==true)][0].proxyId // empty')
+  [ "$PREV" = "$PROXY_ID" ] || api PUT /api/v2/tenant/config/$PROXY_ID '{"isDefault":true}' >/dev/null || exit 1
+fi
 REF_RESPONSE=$(api POST /api/v2/secret-references "$(jq -nc --arg ns "$NS_N" --arg k "$VKEY" '{namespaceId:$ns,name:$k,vaultType:"hashicorp",vaultKey:$k}')")
 REF_STATUS=$?
-[ -z "$PREV" ] || [ "$PREV" = "$PROXY_ID" ] || api PUT /api/v2/tenant/config/$PREV '{"isDefault":true}' >/dev/null || exit 1
-[ "$REF_STATUS" -eq 0 ] || { echo 'Reference creation failed; previous default restored.' >&2; exit 1; }
+if [ "$W" != /tmp/pp-local ]; then
+  [ -z "$PREV" ] || [ "$PREV" = "$PROXY_ID" ] || api PUT /api/v2/tenant/config/$PREV '{"isDefault":true}' >/dev/null || exit 1
+fi
+[ "$REF_STATUS" -eq 0 ] || { echo 'Reference creation failed; stop.' >&2; exit 1; }
 REF_N=$(printf '%s' "$REF_RESPONSE" | jq -er .body.data.id) || exit 1
 EP_N=$(api POST /api/v2/resource-endpoints "$(jq -nc --arg ns "$NS_N" --arg m "$EP_METHOD" --arg h "$EP_HOST" --arg p "$EP_PATH" --arg l "$HDR" --arg r "$REF_N" --arg g "$RG_N" \
   '{namespaceId:$ns,method:$m,host:$h,path:$p,secrets:[{label:$l,secretReferenceId:$r}],resourceGroupIds:[$g]}')" | jq -er .body.data.id) || exit 1
@@ -270,11 +280,11 @@ else echo "INCOMPLETE: RG=$RG_N REF=$REF_N EP=$EP_N GR=$GR_N. Nothing recorded; 
   complete results are recorded.
 - **Reusing a resource group for the same host:** set `RG_N` to its ID and skip
   that line.
-- **Why the default switch:** a new reference is encrypted for whichever proxy
-  is the team default when it's created, and that's fixed from then on, so
-  restoring the previous default afterwards is safe
+- **AWS default switch:** a new reference is encrypted for the zone's default
+  proxy when created, and that's fixed from then on, so restoring the previous
+  default afterwards is safe
   (`guides/reference/concepts.md`, "Secret references are encrypted for the
-  team's default proxy").
+  zone's default proxy").
 
 **3. Refresh the certificate** (part 0), then check that `passport whoami` lists
 the new endpoint and `{{vault:<REF_N>}}`.
