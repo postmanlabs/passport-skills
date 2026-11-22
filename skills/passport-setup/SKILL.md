@@ -13,7 +13,16 @@ skill, or run from a clone of the repo.
 When the user says **"setup passport"** (or similar: "set up the Passport proxy", "run Passport locally",
 "deploy Passport on AWS"):
 
-1. Ask whether this is for **one developer on this machine** or **a team**:
+1. Give this short picture before asking the user to choose:
+
+   ```text
+   Passport app → configures who can use an API
+   Passport proxy → sends approved requests to that API
+   Vault → holds the secret the proxy uses for the request
+   ```
+
+   Ask whether this is for **one developer on this machine** or **a team**. Present both
+   choices without recommending either; explain the tools needed for the chosen path before installing them:
    - **One developer** → follow `guides/local-docker.md`
    - **Team deployment on AWS** → follow `guides/aws-single-instance.md`
 2. Follow that guide **literally**. Do agent steps yourself and hand the

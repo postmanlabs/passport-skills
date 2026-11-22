@@ -83,11 +83,19 @@ each command runs in a fresh shell.
 
 ## What you need
 
-- Docker Desktop (or another Docker daemon), running.
-- A Passport account and team; open `<app_url>/signup?origin=agent` for a new
-  account, or open the selected `app_url` to sign in. The agent reads
-  `APP_URL` from `target.env` and gives the developer the full link.
-- `openssl`, `curl`, `jq`, `node` (`jq` and `node` may need installation).
+Before installing anything, explain these requirements and check what is already available:
+
+- **Docker Desktop (or another Docker daemon), running:** runs the Passport proxy,
+  which sends approved API requests, and a temporary HashiCorp Vault, which holds
+  the secrets used in those requests. Vault dev mode loses its secrets on restart.
+- **Passport account and team:** open `<app_url>/signup?origin=agent` for a new
+  account, or open the selected `app_url` to sign in. Read `APP_URL` from
+  `target.env` and give the developer the full link.
+- **`openssl`:** creates the proxy's private keys. **`curl`:** downloads the CLI
+  installer and tests the request through the proxy. **`jq`:** reads API responses
+  while creating and checking the demo setup.
+- **Node.js:** runs this skill's API helper (`scripts/passport-api.js`), reads the
+  CLI session for the demo, and checks local DNS. Passport itself does not need Node.js.
 
 ---
 
