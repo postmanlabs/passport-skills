@@ -21,8 +21,10 @@ When the user says **"setup passport"** (or similar: "set up the Passport proxy"
    Vault → holds the secret the proxy uses for the request
    ```
 
-   Ask whether this is for **one developer on this machine** or **a team**. Present both
-   choices without recommending either; explain the tools needed for the chosen path before installing them:
+   Use the agent session's interactive multiple-choice question tool (Claude Code:
+   `AskUserQuestion`) to ask **"Who is this setup for?"** with these two options,
+   without preselecting or recommending either. Explain the tools needed for the
+   chosen path before installing them:
    - **One developer** → follow `guides/local-docker.md`
    - **Team deployment on AWS** → follow `guides/aws-single-instance.md`
 2. Follow that guide **literally**. Do agent steps yourself and hand the
