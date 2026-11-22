@@ -13,13 +13,43 @@ skill, or run from a clone of the repo.
 When the user says **"setup passport"** (or similar: "set up the Passport proxy", "run Passport locally",
 "deploy Passport on AWS"):
 
-1. Give this short picture before asking the user to choose:
+1. Before asking the user to choose, give this short introduction and ASCII
+   diagram. Keep the distinction between setup and the live API request:
+
+   Passport lets developers and AI agents call approved APIs without putting
+   the target API's key in their request or agent context. The key is stored
+   in a secret vault; the proxy retrieves it for an approved request. We will
+   set up the pieces, grant access to a demo API, and make a request that
+   proves the proxy fetched the key and used it. Then we can connect one of
+   your own APIs.
+
+   - **Passport web app and control plane:** where you create a team, define
+     API access, and see setup progress. It is not in the API request path.
+   - **Passport Proxy (data plane):** runs near your vault, checks access,
+     replaces a secret reference with the real key, and forwards the request.
+   - **Secret Vault:** holds the real API key; this guide uses HashiCorp Vault.
+   - **Passport CLI:** signs you in and prepares the certificate your API
+     requests need to use the proxy.
 
    ```text
-   Passport app → configures who can use an API
-   Passport proxy → sends approved requests to that API
-   Vault → holds the secret the proxy uses for the request
+   SETUP
+   Developer ----> [Passport web app / control plane]
+       |             team, API rules, access grants
+       +----------> [Passport CLI]  sign-in + client certificate
+   [Passport Proxy] ----registers----> [control plane]
+
+   API REQUEST (control plane is outside this path)
+   Developer / agent --request + secret reference--> [Passport Proxy]
+                                                      |
+                                                      +--fetches key--> [Secret Vault]
+                                                      |
+                                                      +--approved request + key--> [Target API]
    ```
+
+   Explain that the proxy and Vault run in Docker on the developer's machine
+   for the one-developer path, or on an AWS instance for the team path. The
+   setup will install the CLI, start those components, configure a demo API,
+   and check a real request through the proxy.
 
    Use the agent session's interactive multiple-choice question tool (Claude Code:
    `AskUserQuestion`) to ask **"Who is this setup for?"** with these two options,
