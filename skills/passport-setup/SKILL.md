@@ -66,6 +66,10 @@ still waits until they say so.
   missing, ask the user — don't search elsewhere.
 - **Discover before asking.** Check installed tools, profiles, regions, login state and existing resources
   first; infer routine choices and state them; ask only for what's genuinely missing, in one go.
+- **Explain prerequisites before installation.** For the chosen setup, list each missing tool in
+  plain language: what it does here, where it will come from, and the exact install command.
+  Ask the developer to approve that list before installing anything or downloading Docker
+  images. Reuse tools and images already present.
 - **Ask before every AWS infrastructure change, naming every resource.** Show a table of exactly what will be created or
   deleted (type, name, ID, account, region) plus the full commands, and get one yes per block. Read-only
   commands run freely. A "yes"/"go ahead" approves that block: run it, verify it, report, all in that turn.
@@ -91,17 +95,14 @@ still waits until they say so.
   contain a secret, and never put a secret in user-data, a commit, or chat.
 - **Never tear anything down** until the user explicitly says so.
 - **Check existing state first** and reuse it; record every resource you create so cleanup is exact.
-- **Detect an MDM-managed Mac at the start** (step 1 of either guide): `passport daemon status` showing
-  `routing source managed`, CLI output saying `(from macOS managed plist)`, or the other signs in
-  `guides/reference/mdm-macs.md`. Then follow that file; don't probe the filesystem for the profile. On
-  AWS this must be settled before step 2, because the instance is built for the team the CLI reports.
 - **Long waits are not failures.** Some AWS waits take 3–15 minutes. If your command tool has a time
   limit, give them a longer timeout or run them in the background, and re-run only the wait.
 
 ## Layout (relative to this folder)
 - `guides/` — `local-docker.md`, `aws-single-instance.md`, and `after-setup.md` (shared by both)
 - `guides/reference/` — shared by both setups: `concepts.md` (the why: default-proxy rule, endpoints,
-  certificates, daemon), `troubleshooting.md`, `mdm-macs.md`, `verification.md` (what has been tested, when)
+  certificates, daemon), `troubleshooting.md`, `verification.md` (what has been tested, when)
 - `scripts/` — `preflight.sh` (read-only AWS checks + free name), `env.sh` (shared helpers), `aws-resources.sh`
-  (what exists / what cleanup would delete, tag-checked), `passport-api.js` (Passport Cloud API helper)
+  (what exists / what cleanup would delete, tag-checked), `passport-api.js` (AWS API helper),
+  `local-api.sh` and `local-api.ps1` (local API helpers)
 - `templates/` — EC2 user-data, CloudFront files, and `operator-iam-policy.json` (the AWS permissions the guide needs)

@@ -21,8 +21,8 @@ The rest of this file uses the same names for both setups.
 
 ```bash
 cd /tmp/pp-local; . ./ids.env; W=/tmp/pp-local
-. ./target.env; export PASSPORT_API PASSPORT_DIR     # MDM Mac: set PASSPORT_DIR=~/passport-cli-dl/.passport
-api() { node /tmp/pp-local/passport-api.js "$@"; }
+. ./target.env; export PASSPORT_API PASSPORT_DIR
+api() { bash /tmp/pp-local/local-api.sh "$@"; }
 PROXY=https://localhost:8443; MGMT=http://localhost:8081; DESTCA=/tmp/pp-local/proxy-ca.pem; D=$PASSPORT_DIR
 ```
 
@@ -44,9 +44,7 @@ PROXY=https://$PROXY_HOST:8443; MGMT=https://$CF_DOMAIN; DESTCA=/tmp/pp-aws/prox
 
 **Refresh your certificate** after any grant change:
 - **local:** `passport setup --management-url $MGMT --proxy-url $PROXY`;
-  on an MDM Mac, the container form in `guides/reference/mdm-macs.md` (A.4);
-- **AWS:** `cli setup --management-url $MGMT --proxy-url $PROXY ${MDM:+--no-daemon}`
-  (works on an MDM Mac too).
+- **AWS:** `cli setup --management-url $MGMT --proxy-url $PROXY`.
 
 **[you] steps that differ by setup:**
 
@@ -146,17 +144,16 @@ Rules for this message:
 
   | User's machine | Block to give |
   |---|---|
-  | **macOS** (not MDM), after `passport setup` installed the daemon | the block above. New terminal windows already have these variables, and the `export` lines just make that explicit |
+  | **macOS**, after `passport setup` installed the daemon | the block above. New terminal windows already have these variables, and the `export` lines just make that explicit |
   | **Windows** (PowerShell), after `passport setup` | `$env:HTTPS_PROXY="http://127.0.0.1:10144"; curl.exe -sS -H "x-demo-api-key: {{vault:<REF>}}" https://passport-demo.mock.postman.postman.dev`. `curl.exe` uses the Windows certificate store, so run `passport ca install` first. *Unverified* |
   | **Linux** | first `passport daemon start` (setup can't install the daemon on Linux), then the block above |
-  | **MDM-managed Mac** | the block above, with `SSL_CERT_FILE=~/passport-cli-dl/.passport/ca.pem`. It needs the daemon container from `guides/reference/mdm-macs.md`, A.5 |
 
   If the daemon isn't running, give the explicit form ("What I ran") as the
   thing to copy, and say why.
 - **The proof command.** Show the daemon form (no flags, as above) if the
   daemon is running. Otherwise show the explicit form you actually ran
   (`curl --proxy $PROXY … -H "x-demo-api-key: …" https://passport-demo…`), and
-  say the daemon isn't set up. On an MDM Mac it never is.
+  say the daemon isn't set up.
 - **One next step:** for local, inspect “See what was created,” then choose
   agent or app for their own API; for AWS, offer their own API (part 2).
 - **Be honest about the demo key.** It's the demo API's public sample key, so it
@@ -237,7 +234,11 @@ the first line:
 EP_METHOD=GET; EP_HOST=api.github.com; EP_PATH=/user; VKEY=github-token; HDR=Authorization
 # … then your part-0 load block …
 set -o pipefail
-PP_USER=$(node -e 'const fs=require("fs"),p=require("path");const t=JSON.parse(fs.readFileSync(p.join(process.env.PASSPORT_DIR,"passportrc"),"utf8")).login._profiles[0].workos.accessToken;console.log(JSON.parse(Buffer.from(t.split(".")[1],"base64url")).sub)')
+if [ "$W" = /tmp/pp-local ]; then
+  PP_USER=$(api user-id) || exit 1
+else
+  PP_USER=$(node -e 'const fs=require("fs"),p=require("path");const t=JSON.parse(fs.readFileSync(p.join(process.env.PASSPORT_DIR,"passportrc"),"utf8")).login._profiles[0].workos.accessToken;console.log(JSON.parse(Buffer.from(t.split(".")[1],"base64url")).sub)')
+fi
 # Local: list access groups and choose a non-demo one, or create one named for the project.
 # AWS: preserve the original flow by using its demo namespace.
 if [ "$W" = /tmp/pp-local ]; then
@@ -276,7 +277,7 @@ else echo "INCOMPLETE: RG=$RG_N REF=$REF_N EP=$EP_N GR=$GR_N. Nothing recorded; 
 - **`INCOMPLETE`** usually means the login token expired (it lasts about an
   hour); the failed call is also printed as `api: <method> <path> -> <status>`.
   Delete any IDs it did create, run `passport auth status` (it refreshes the
-  token; AWS on an MDM Mac: `cli auth status`), then re-run the block. Only
+  token), then re-run the block. Only
   complete results are recorded.
 - **Reusing a resource group for the same host:** set `RG_N` to its ID and skip
   that line.
@@ -318,13 +319,11 @@ environment variables are set:
 curl -sS -H "Authorization: Bearer {{vault:<REF_N>}}" "https://api.github.com/user"
 ```
 
-- **macOS/Windows (not MDM):** `passport setup` without `--no-daemon` installed
+- **macOS/Windows:** `passport setup` without `--no-daemon` installed
   it. Check with `echo $HTTPS_PROXY` (`http://127.0.0.1:10144`, in a terminal
   opened after setup) and `passport daemon status`. For tools that use the OS
   trust store, the user runs `passport ca install` once (it needs `sudo`).
 - **Linux:** `passport daemon start`, then export the variables yourself.
-- **MDM Mac:** only with the daemon container (`guides/reference/mdm-macs.md`,
-  A.5); otherwise use the explicit form.
 - **Hosts it never routes** (`localhost`, private ranges, `.internal`,
   `.usepassport.ai` and others in `NO_PROXY`): use the explicit form for an API
   on those. The full list, the per-platform variables, the rc-file option and

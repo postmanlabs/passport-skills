@@ -70,10 +70,6 @@ each command runs in a fresh shell.
 - **The developer creates the named proxy in the app.** The proxy registers
   itself with its one-time token. Create the demo resources through the API
   after the app reports Healthy; do not create a second proxy record.
-- **MDM-managed Mac:** step 1 checks for it. If a sign shows up later anyway
-  (`guides/reference/mdm-macs.md`, "How to tell"), switch then. On such a Mac
-  the CLI ignores `--management-url`/`--proxy-url`, so every CLI command runs
-  in that file's container.
 - **Check existing state first** (containers, network, keys, CLI version) and
   reuse it; never regenerate `ref.pem` if one is registered.
 - **After the step 7 test, continue with `guides/after-setup.md`**: show the
@@ -83,7 +79,10 @@ each command runs in a fresh shell.
 
 ## What you need
 
-Before installing anything, explain these requirements and check what is already available:
+Before installing anything, check which tools are already available. Tell the
+developer only what is missing, what each missing tool does here, and the exact
+official install command. Include Docker images that will be downloaded. Ask for
+approval before installing or pulling anything.
 
 - **Docker Desktop (or another Docker daemon), running:** runs the Passport proxy,
   which sends approved API requests, and a temporary HashiCorp Vault, which holds
@@ -93,9 +92,21 @@ Before installing anything, explain these requirements and check what is already
   `target.env` and give the developer the full link.
 - **`openssl`:** creates the proxy's private keys. **`curl`:** downloads the CLI
   installer and tests the request through the proxy. **`jq`:** reads API responses
-  while creating and checking the demo setup.
-- **Node.js:** runs this skill's API helper (`scripts/passport-api.js`), reads the
-  CLI session for the demo, and checks local DNS. Passport itself does not need Node.js.
+  while creating and checking the demo setup. **`ping`:** checks local name resolution.
+
+On macOS or Linux, check without installing anything:
+
+```bash
+for tool in docker passport openssl curl jq ping; do
+  command -v "$tool" >/dev/null && printf '%s: available\n' "$tool" || printf '%s: missing\n' "$tool"
+done
+```
+
+On Windows, use PowerShell's `Get-Command` to check prerequisites. PowerShell
+already parses JSON; do not ask a Windows developer to install `jq` for that.
+The Windows setup needs PowerShell commands; do not run the bash blocks there.
+
+No Node.js installation is needed for this path.
 
 ---
 
@@ -106,8 +117,9 @@ Create or select a team in the app before logging in to the CLI. Keep
 
 Check the active `passport --help` and all copies on PATH first. The Enterprise
 CLI has `login` and `setup`; the Community CLI has `lens`. If the intended
-Enterprise binary is already first on PATH, reuse it. Otherwise install from
-the selected `cli_download_base_url`; ask before removing a shadowing binary.
+Enterprise binary is already first on PATH, reuse it. Otherwise show the installer
+from the selected `cli_download_base_url` and ask for approval before running it.
+Ask before removing a shadowing binary.
 
 Use the official installer from the
 [Passport CLI install docs](https://docs.usepassport.ai/passport/reference/passport-cli/install).
@@ -137,18 +149,6 @@ install. Compare `/usr/local/bin/passport --help` with `passport --help` and
 correct `PATH` before continuing. On Windows, use
 `Get-Command passport -All` to find each copy. Do not delete a shadowing
 binary without asking: a running daemon may use it.
-
-Check for an MDM-managed Mac first (read-only):
-
-```bash
-passport daemon status 2>&1 | grep -E 'routing source' || echo "(no host daemon running: no sign either way)"
-```
-
-> **On an MDM-managed Mac** (`routing source managed` above, or later `login`
-> auto-running `setup` against endpoints you didn't ask for), the CLI is pinned
-> to your organisation's proxy and ignores `--management-url`/`--proxy-url`.
-> Follow `guides/reference/mdm-macs.md` from here instead of logging in below:
-> it runs the CLI in a Linux container, and tells you which steps change.
 
 Then log in with the CLI installed from the selected URL:
 
@@ -284,16 +284,10 @@ names resolve to loopback and that host ports 443 and 80 are free. Do not edit
 and the test requests; omit both 443 and 80 port mappings below.
 
 ```bash
-node - <<'NODE'
-for (const host of ['passport-proxy.localhost', 'passport-management.localhost']) {
-  require('node:dns').lookup(host, { all: true }, (error, addresses) => {
-    if (error || !addresses.some(({ address }) => address === '127.0.0.1')) {
-      console.error(`${host} does not resolve to loopback`);
-      process.exitCode = 1;
-    }
-  });
-}
-NODE
+for host in passport-proxy.localhost passport-management.localhost; do
+  ping -c 1 "$host" 2>&1 | head -1 | grep -q '127\.0\.0\.1' ||
+    { echo "$host does not resolve to IPv4 loopback" >&2; exit 1; }
+done
 ```
 
 ### 4.3 Start the container
@@ -376,18 +370,17 @@ For this local flow, the named proxy must be the zone's only proxy and its
 default; stop if another proxy is present. Details: `guides/reference/concepts.md`.
 
 The CLI session authenticates these calls. The token is read from `passportrc`
-and never printed. On an MDM Mac, set
-`PASSPORT_DIR=~/passport-cli-dl/.passport` first.
+and never printed.
 Before running the create block, check `/tmp/pp-local/ids.env` and list the
 team's namespaces. If the demo was already created, verify and reuse its
 recorded IDs; if objects exist without that record, stop and inspect them
 instead of creating duplicates.
 
 ```bash
-cp "$SKILL_DIR/scripts/passport-api.js" /tmp/pp-local/passport-api.js
+cp "$SKILL_DIR/scripts/local-api.sh" /tmp/pp-local/local-api.sh
 . /tmp/pp-local/target.env
 export PASSPORT_API PASSPORT_DIR
-api() { node /tmp/pp-local/passport-api.js "$@"; }
+api() { bash /tmp/pp-local/local-api.sh "$@"; }
 set -o pipefail
 cd /tmp/pp-local
 PROXY_NAME='<exact name created in the app>'
@@ -402,7 +395,7 @@ GOT=$(printf '%s' "$PROXY_LIST" | jq -r --arg p "$PROXY_ID" \
   '.body.data[] | select(.proxyId==$p).publicKey' | openssl pkey -pubin -outform DER | openssl dgst -sha256 | awk '{print $NF}')
 [ "$WANT" = "$GOT" ] || { echo 'Registered key differs from local ref.pem; stop.' >&2; exit 1; }
 # Create the demo in its own namespace; do not reuse it for the developer's API.
-PP_USER=$(node -e 'const fs=require("fs"),os=require("os"),p=require("path");const rc=JSON.parse(fs.readFileSync(p.join(process.env.PASSPORT_DIR||p.join(os.homedir(),".passport"),"passportrc"),"utf8"));console.log(JSON.parse(Buffer.from(rc.login._profiles[0].workos.accessToken.split(".")[1],"base64url")).sub)')
+PP_USER=$(api user-id) || exit 1
 NS=$(api POST /api/v1/namespaces '{"name":"passport-proxy-local-dev-e2e","description":"Passport proxy e2e test"}' | jq -er '.body.data.id') || exit 1
 RG=$(api POST /api/v1/namespaces/$NS/resource-groups '{"name":"passport-demo.mock.postman.postman.dev","description":"Passport proxy e2e test","source":"manual"}' | jq -er '.body.data.id') || exit 1
 REF=$(api POST /api/v2/secret-references "$(jq -nc --arg ns "$NS" '{namespaceId:$ns,name:"demo",vaultType:"hashicorp",vaultKey:"demo-api-key"}')" | jq -er '.body.data.id') || exit 1
@@ -457,7 +450,7 @@ what it saw:
 ```bash
 . /tmp/pp-local/target.env; export PASSPORT_DIR
 source /tmp/pp-local/ids.env                         # gives $REF (step 5), or take the UUID from `passport whoami`
-D=$PASSPORT_DIR                                      # MDM: ~/passport-cli-dl/.passport
+D=$PASSPORT_DIR
 curl -s http://passport-management.localhost/ca.pem -o /tmp/pp-local/proxy-ca.pem
 R=$(curl -sS --proxy https://passport-proxy.localhost \
   --proxy-cacert $D/ca.pem --proxy-cert $D/cert.pem --proxy-key $D/key.pem \
@@ -507,8 +500,8 @@ those first (grant → endpoint → group → secret reference → namespace), a
 stop the daemon:
 
 ```bash
-cd /tmp/pp-local; . ./target.env; export PASSPORT_API PASSPORT_DIR   # MDM: set PASSPORT_DIR=~/passport-cli-dl/.passport
-api() { node /tmp/pp-local/passport-api.js "$@"; }
+cd /tmp/pp-local; . ./target.env; export PASSPORT_API PASSPORT_DIR
+api() { bash /tmp/pp-local/local-api.sh "$@"; }
 [ -f resources.env ] && while read -r m u rest; do
   eval "$rest"   # sets NS_N NS_CREATED RG REF EP GR
   api DELETE /api/v2/access-grants/$GR; api DELETE /api/v2/resource-endpoints/$EP
@@ -537,10 +530,9 @@ there too (Access groups → delete; Proxy settings → remove).
 ---
 
 
-## Troubleshooting, MDM Macs, safety
+## Troubleshooting and safety
 
 - Troubleshooting (shared with the AWS setup): `guides/reference/troubleshooting.md`
-- MDM-managed Macs (run the CLI in a Linux container): `guides/reference/mdm-macs.md`
 - Why things work the way they do: `guides/reference/concepts.md`
 
 ## Safety notes
