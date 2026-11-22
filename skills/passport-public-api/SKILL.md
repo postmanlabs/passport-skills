@@ -92,17 +92,23 @@ Base URL `api_url`, on every request:
 Authorization: Bearer sk_...
 ```
 
-The user creates this WorkOS key in the selected Passport app under **Organization → API keys**. This API
-cannot mint one. Do not have them paste it into the chat — ask them to expose it to your commands
-from wherever they keep it, and read it from the environment in any code you write. Revocation takes
-~45s to propagate, so a revoked key may briefly still work.
+The user creates this WorkOS key in the selected Passport app under
+**Account → API keys** (`<app_url>/me/api-keys`). This API cannot mint one.
+For initial local setup, the user starts the agent with `PASSPORT_API_KEY` in
+its environment. Warn that the agent process and tools can read this value;
+never print it, place it in a command argument, or parse `passportrc` for CLI
+tokens. After the setup skill verifies a replacement key stored in Vault,
+`PASSPORT_API_KEY_REF` makes the local Bash API helper send a reference through
+the proxy. This replacement path is not yet implemented in the PowerShell
+helper. Never claim this removes all agent access if an earlier key is still in
+the environment or a tool log. Revocation takes ~45s to propagate.
 
 ## Which role do you hold?
 
 | Key owner | Role | Can do |
 | --- | --- | --- |
-| Organization | `admin` | Full catalog CRUD + access requests, including approve/reject |
-| User | `member` | Reads + create/list/get/cancel own access requests |
+| Team admin's user key (or a legacy organization key) | `admin` | Full catalog CRUD + access requests, including approve/reject |
+| Team member's user key | `member` | Reads + create/list/get/cancel own access requests |
 
 No endpoint reports your role. `GET /public/v1/namespaces` tells you the key is valid but not which
 role it holds — do not probe with a write to find out. Ask the user which kind of key they gave you.
@@ -196,7 +202,12 @@ A member key reads what an admin built and asks for access to it.
 
 **Done when** that `GET` returns `status: approved` with `decidedAt` set.
 
-## Approval is a human decision
+## Approval and admin self-requests
+
+When a user-owned admin key files a request for its own user, the service
+normally auto-approves it and creates the grant. Read the returned status and
+grant before proceeding. If it stays pending, let the user decide it in the
+app. Organization-owned legacy keys have no user and do not get this path.
 
 An admin key can decide a pending request:
 `POST /public/v1/access-requests/{accessRequestId}/approve` or `/reject`, with an optional

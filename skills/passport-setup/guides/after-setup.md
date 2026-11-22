@@ -171,7 +171,8 @@ For each step you run, show three things, in this order:
 1. **What I ran:** the exact commands, verbatim, with real values. If several
    commands ran (create objects, refresh the certificate, the request), show
    them all, in order. For Passport API calls, show the call line
-   (`api POST /api/v2/access-grants …`) and the ID it returned.
+   (for local, `api POST /public/v1/access-requests …`; for AWS, its existing
+   internal call) and the ID it returned.
 2. **What came back:** the real output. Trim long output, but never paraphrase it.
 3. **What it proves:** one plain sentence.
 
@@ -193,8 +194,13 @@ the created objects and verify a request; do not run the create calls below.
 Before either path, confirm the named proxy is still the zone's only proxy
 and its default; stop if that is no longer true.
 Either path must use an existing **non-demo** access group or create one.
-The demo namespace is excluded from the app's own-API progress. The agent
-path below is also used for AWS, without changing its deployment steps.
+The demo namespace is excluded from the app's own-API progress. For the local
+agent path, use the companion **`passport-public-api`** skill with the selected
+API URL and verified `PASSPORT_API_KEY_REF` after rotation. It creates catalog
+objects through `/public/v1/`, files an access request, waits for the
+developer to approve it in the app, and tests the API through the proxy.
+Never read `passportrc` or call the internal API for local catalog changes.
+The command block in step 2.3 below is for the **AWS path only**.
 
 ### 2.1 Ask for three things (never the secret value)
 
@@ -227,42 +233,23 @@ setup (part 0 table). It never appears in chat or shell history. Wait for
 credential. On local Docker, the developer runs the script in their terminal;
 the agent never receives the value.
 
-**2. The agent creates the Passport objects itself**, without asking. Fill in
-the first line:
+**2. For AWS only, the agent creates the Passport objects.** For local, use
+the public API skill as described above. Fill in the first line:
 
 ```bash
 EP_METHOD=GET; EP_HOST=api.github.com; EP_PATH=/user; VKEY=github-token; HDR=Authorization
 # … then your part-0 load block …
 set -o pipefail
-if [ "$W" = /tmp/pp-local ]; then
-  PP_USER=$(api user-id) || exit 1
-else
-  PP_USER=$(node -e 'const fs=require("fs"),p=require("path");const t=JSON.parse(fs.readFileSync(p.join(process.env.PASSPORT_DIR,"passportrc"),"utf8")).login._profiles[0].workos.accessToken;console.log(JSON.parse(Buffer.from(t.split(".")[1],"base64url")).sub)')
-fi
-# Local: list access groups and choose a non-demo one, or create one named for the project.
-# AWS: preserve the original flow by using its demo namespace.
-if [ "$W" = /tmp/pp-local ]; then
-  api GET /api/v1/namespaces
-  NS_N=$(api POST /api/v1/namespaces '{"name":"<project-access-group>","description":"Developer API"}' | jq -er .body.data.id) || exit 1
-  NS_CREATED=1                     # if reusing a non-demo group: set its ID and NS_CREATED=0
-else
-  NS_N=$NS; NS_CREATED=0
-fi
+if [ "$W" = /tmp/pp-local ]; then echo 'Use passport-public-api for the local path.' >&2; exit 1; fi
+PP_USER=$(node -e 'const fs=require("fs"),p=require("path");const t=JSON.parse(fs.readFileSync(p.join(process.env.PASSPORT_DIR,"passportrc"),"utf8")).login._profiles[0].workos.accessToken;console.log(JSON.parse(Buffer.from(t.split(".")[1],"base64url")).sub)')
+NS_N=$NS; NS_CREATED=0
 RG_N=$(api POST /api/v1/namespaces/$NS_N/resource-groups "$(jq -nc --arg n "$EP_HOST" '{name:$n,description:"Added after e2e",source:"manual"}')" | jq -er .body.data.id) || exit 1
 PROXIES=$(api GET /api/v2/tenant/config) || exit 1
-if [ "$W" = /tmp/pp-local ]; then
-  printf '%s' "$PROXIES" | jq -e --arg p "$PROXY_ID" \
-    '(.body.data | length)==1 and .body.data[0].proxyId==$p and .body.data[0].isDefault==true' >/dev/null || exit 1
-else
-  # AWS retains the existing default-proxy procedure.
-  PREV=$(printf '%s' "$PROXIES" | jq -r '[.body.data[]|select(.isDefault==true)][0].proxyId // empty')
-  [ "$PREV" = "$PROXY_ID" ] || api PUT /api/v2/tenant/config/$PROXY_ID '{"isDefault":true}' >/dev/null || exit 1
-fi
+PREV=$(printf '%s' "$PROXIES" | jq -r '[.body.data[]|select(.isDefault==true)][0].proxyId // empty')
+[ "$PREV" = "$PROXY_ID" ] || api PUT /api/v2/tenant/config/$PROXY_ID '{"isDefault":true}' >/dev/null || exit 1
 REF_RESPONSE=$(api POST /api/v2/secret-references "$(jq -nc --arg ns "$NS_N" --arg k "$VKEY" '{namespaceId:$ns,name:$k,vaultType:"hashicorp",vaultKey:$k}')")
 REF_STATUS=$?
-if [ "$W" != /tmp/pp-local ]; then
-  [ -z "$PREV" ] || [ "$PREV" = "$PROXY_ID" ] || api PUT /api/v2/tenant/config/$PREV '{"isDefault":true}' >/dev/null || exit 1
-fi
+[ -z "$PREV" ] || [ "$PREV" = "$PROXY_ID" ] || api PUT /api/v2/tenant/config/$PREV '{"isDefault":true}' >/dev/null || exit 1
 [ "$REF_STATUS" -eq 0 ] || { echo 'Reference creation failed; stop.' >&2; exit 1; }
 REF_N=$(printf '%s' "$REF_RESPONSE" | jq -er .body.data.id) || exit 1
 EP_N=$(api POST /api/v2/resource-endpoints "$(jq -nc --arg ns "$NS_N" --arg m "$EP_METHOD" --arg h "$EP_HOST" --arg p "$EP_PATH" --arg l "$HDR" --arg r "$REF_N" --arg g "$RG_N" \

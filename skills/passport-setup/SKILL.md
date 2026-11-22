@@ -33,6 +33,11 @@ When the user says **"setup passport"** (or similar: "set up the Passport proxy"
    relative to this folder, and `$SKILL_DIR` in the guides means its absolute path (the folder
    containing this `SKILL.md`).
 
+Before creating catalog objects, read `guides/reference/concepts.md` for the
+Passport terms and dependency order. Keep that small, bundled glossary as the
+setup authority; public documentation is supplemental and may describe a
+different API version.
+
 ## After setup: help the user see the value of Passport
 The person running this is usually **evaluating Passport, often as a potential customer**. A
 working proxy is the start, not the finish line. Once the e2e test passes, your job is to help
@@ -74,10 +79,18 @@ still waits until they say so.
   deleted (type, name, ID, account, region) plus the full commands, and get one yes per block. Read-only
   commands run freely. A "yes"/"go ahead" approves that block: run it, verify it, report, all in that turn.
 - **Passport API and CLI calls are yours when the developer chooses the agent path.** Create and delete
-  namespaces, resource groups, references, endpoints and grants, and run
+  namespaces, resource groups, references and endpoints, file access requests,
+  and run
   `passport setup`/`whoami`/`request`/`daemon`/`ca status` yourself. In the local
   setup, the developer creates the named proxy in the app and types its one-time
-  token in their own terminal; the proxy registers itself. If they choose the
+  token in their own terminal; the proxy registers itself. The service may
+  auto-approve an admin's request for that same user. Check the approved
+  status and resulting grant; if it stays pending, the developer decides it
+  in the app. An agent never calls the approve endpoint for its own request.
+  Local API calls use the selected `/public/v1/` API with `PASSPORT_API_KEY`
+  during bootstrap, then a verified Vault reference through the proxy. Never
+  parse `passportrc` to obtain an access or refresh token on the local path.
+  If they choose the
   app path for their own API, guide and verify instead of creating duplicates.
   The AWS guide retains its existing agent-run registration flow.
 - **Create references for the right proxy.** Passport encrypts each new
@@ -93,6 +106,12 @@ still waits until they say so.
 - **Never print or paste secrets:** registry keys (AWS path), private keys, proxy or Vault tokens, login tokens, API credentials.
   Public keys, IDs and sha256s are fine; compare sha256s instead. Never print an API response that could
   contain a secret, and never put a secret in user-data, a commit, or chat.
+- **Explain the bootstrap API key risk.** The developer creates it in the app
+  and starts the agent with `PASSPORT_API_KEY` set. This lets the agent use the
+  public API but also makes the key readable to the agent process and tools.
+  After a successful demo, guide a tested replacement key into local Vault,
+  verify it through the proxy, then have the developer revoke the bootstrap
+  key. Do not claim rotation succeeded until that request works.
 - **Never tear anything down** until the user explicitly says so.
 - **Check existing state first** and reuse it; record every resource you create so cleanup is exact.
 - **Long waits are not failures.** Some AWS waits take 3–15 minutes. If your command tool has a time

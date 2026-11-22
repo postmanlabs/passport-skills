@@ -5,17 +5,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$dir = if ($env:PASSPORT_DIR) { $env:PASSPORT_DIR } else { Join-Path $HOME '.passport' }
-$session = Get-Content (Join-Path $dir 'passportrc') -Raw | ConvertFrom-Json
-$token = $session.login._profiles[0].workos.accessToken
-if (-not $token) { throw 'Passport login is missing.' }
-$part = $token.Split('.')[1].Replace('-', '+').Replace('_', '/')
-$part = $part.PadRight($part.Length + (4 - $part.Length % 4) % 4, '=')
-$claims = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($part)) | ConvertFrom-Json
-if ($claims.exp -le [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) { throw 'Login expired; run passport auth status.' }
-if (-not $claims.org_id) { throw 'Choose a Passport team before continuing.' }
-if ($Method -eq 'user-id') { $claims.sub; return }
-if ($Method -notin @('GET', 'POST', 'PUT', 'PATCH', 'DELETE') -or -not $Path.StartsWith('/')) { throw 'Invalid API method or path.' }
+$token = $env:PASSPORT_API_KEY
+if (-not $token) { throw 'Set PASSPORT_API_KEY in the agent environment first.' }
+if ($Method -notin @('GET', 'POST', 'PUT', 'PATCH', 'DELETE') -or -not $Path.StartsWith('/public/v1/')) { throw 'Only /public/v1/ API paths are allowed.' }
 if (-not $env:PASSPORT_API) { throw 'PASSPORT_API is not set.' }
 $headers = @{ Authorization = "Bearer $token"; Accept = 'application/json' }
 $params = @{ Uri = $env:PASSPORT_API.TrimEnd('/') + $Path; Method = $Method; Headers = $headers; UseBasicParsing = $true }

@@ -30,12 +30,18 @@ something, and keep "Not verified yet" honest.
 
 ## Not verified yet
 
-- **The new local token-registration flow end to end.** On 2026-11-20 an
-  anonymous registry request showed `latest` and `v0.11.0` both resolve to
-  `sha256:a4fa458d63817e70410fae9513f0a73725f43f20ffc2cb4fe2f62f027c3d7017`.
-  This older image does not implement token registration. The local guide
-  assumes `latest` will include that feature before publication. The app,
-  service, schema, gateway and new image still need a joint test.
+- The local demo created through the **public** `/public/v1/` API with a
+  temporary `PASSPORT_API_KEY`, a human-approved access request, and subsequent
+  API calls through a Vault-held replacement key. The OpenAPI contract and app
+  tour were inspected; no live end-to-end run has confirmed this path.
+- The public API key replacement flow on Windows PowerShell. The PowerShell
+  helper accepts the bootstrap key, but does not yet send Vault references
+  through the proxy; do not claim Windows rotation is complete.
+- **The new local token-registration flow end to end.** The local guide now
+  pulls public test tag `beta-71ed5cf` (source commit `71ed5cfd20eb15f770fd7495bb87c217a5ce8136`,
+  image digest `sha256:e7504b302770d2ff89ca94a42ddc3578ad195f3d14aedf99c2f1f2bbfcec8295`).
+  An anonymous registry read succeeded on 2026-11-22. The app, service, schema,
+  gateway and new image still need a joint test.
 - The redesigned app's final **Proxy settings** and **Access groups** click
   path. The test account still showed older labels and manual proxy
   creation on 2026-11-20.

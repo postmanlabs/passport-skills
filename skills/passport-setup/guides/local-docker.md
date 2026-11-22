@@ -29,8 +29,9 @@ app and API from different environments. Carry the same values into the
 Record the selected values once. Substitute all three URLs if the developer
 provided a complete alternate set, and use a separate CLI data directory for
 that environment. If this file already exists, inspect it
-and stop if any URL differs from the requested destination; do not overwrite
-it silently. Keep its image reference at the public `:latest` address below.
+and stop if any URL or the image reference differs from the requested
+destination; do not overwrite it silently. For this beta test, use the pinned
+public test tag below.
 Every later command that calls the app, API or installer loads this file; the
 companion skill loads it too.
 
@@ -42,7 +43,7 @@ APP_URL='https://app.usepassport.ai'
 PASSPORT_API='https://api.usepassport.ai'
 CLI_DOWNLOAD_BASE_URL='https://dl-passport.pstmn.io/install/enterprise'
 PASSPORT_DIR="$HOME/.passport"
-PROXY_IMAGE_REF='public.ecr.aws/q4k6e3c0/passport/passport-proxy:latest'
+PROXY_IMAGE_REF='public.ecr.aws/q4k6e3c0/passport/passport-proxy:beta-71ed5cf'
 EOF
   )
 fi
@@ -63,10 +64,14 @@ each command runs in a fresh shell.
 - **The proxy token and any real secret are human-only inputs.** The developer
   enters each in their terminal's hidden prompt; never ask them to paste it
   into chat.
+- **Public API bootstrap key:** the developer creates an organization-owned key
+  in the selected app and puts it in `PASSPORT_API_KEY` before starting the
+  agent. It is temporarily readable by the agent's process. Never print it,
+  inspect `passportrc`, or use the CLI's access/refresh tokens for API calls.
 - **The browser approvals** (`passport login`) are the user's. Show the login
   link on its own line, as a full `https://` URL with the confirmation code. If
   it expires, restart `login` and give a fresh one.
-- **Read the team ID yourself** from `passport auth status` (step 4.2).
+- **Read the team ID yourself** from `passport whoami --json` after login.
 - **The developer creates the named proxy in the app.** The proxy registers
   itself with its one-time token. Create the demo resources through the API
   after the app reports Healthy; do not create a second proxy record.
@@ -141,7 +146,7 @@ irm "<selected cli_download_base_url>/win64.ps1" | iex
 ```
 
 Check `passport --help` again after installation: it must list `login` and
-`setup`. Check `passport login --help` for `--no-setup`.
+`setup`.
 
 On macOS or Linux, run `which -a passport`. The installer puts the CLI in
 `/usr/local/bin/passport`. If another copy comes first, it shadows the new
@@ -154,30 +159,32 @@ Then log in with the CLI installed from the selected URL:
 
 ```bash
 . /tmp/pp-local/target.env; export PASSPORT_DIR
-passport login --no-setup
+passport login
 ```
 
-This opens a browser to authenticate without configuring a proxy. Run explicit
-`passport setup` only after the local proxy is Healthy (step 6).
+This opens a browser to authenticate and runs the CLI's initial setup. An empty
+bundle with no secret references is expected before the local proxy and demo
+access are created. Run `passport setup` again after the proxy is Healthy and
+the demo access is granted (step 6).
 
 ### 1.1 Confirm you have a team
 
 If `login` says `authenticated login session has no organization`, create a
-Passport **team** at `<app_url>` and re-run `passport login --no-setup`.
+Passport **team** at `<app_url>` and re-run `passport login`.
 
 Retrying `passport login` does **not** surface any team-selection or
 team-creation screen, even on a fresh account. The CLI's own hint ("select an
 organization during `passport login`") is misleading here; don't look for a
 prompt that won't appear.
 
-Confirm `passport auth status` reports the intended `org_...` team ID. Use
+Confirm `passport whoami --json` reports the intended `org_...` team ID. Use
 this ID for the proxy's allowed team list.
 
 ---
 
 ## 2. Pull the public proxy image
 
-Pull `:latest` from public ECR without registry credentials. A fresh setup
+Pull the `beta-71ed5cf` test image from public ECR without registry credentials. A fresh setup
 uses the image returned by this pull; an existing proxy container keeps the
 image it was started with. The local path uses Docker only; Helm is for a
 team deployment.
@@ -270,7 +277,7 @@ app still shows the older manual URL/public-key form, stop: the token flow
 has not reached this environment. The agent does not create a second proxy
 through the API.
 
-Read the `org_...` team ID from `passport auth status` with the selected
+Read the `org_...` team ID from `passport whoami --json` with the selected
 `PASSPORT_DIR` exported. The app's setup view
 also supplies a bundle issuer and, sometimes, an audience. Use those exact
 non-secret values in the command below; omit the audience flag when it is
@@ -361,7 +368,7 @@ registration error and stop before creating references.
 
 ---
 
-## 5. Create the demo access group, endpoint and grant
+## 5. Create the demo access group, endpoint and access grant
 
 The agent creates the demo through `<api_url>` after the proxy is **Healthy**.
 The app calls its access group a **namespace** in API paths. Use a bare host
@@ -369,49 +376,116 @@ without a port. The reference is encrypted for the zone's **default** proxy.
 For this local flow, the named proxy must be the zone's only proxy and its
 default; stop if another proxy is present. Details: `guides/reference/concepts.md`.
 
-The CLI session authenticates these calls. The token is read from `passportrc`
-and never printed.
-Before running the create block, check `/tmp/pp-local/ids.env` and list the
-team's namespaces. If the demo was already created, verify and reuse its
-recorded IDs; if objects exist without that record, stop and inspect them
-instead of creating duplicates.
+### 5.1 Get a temporary public API key
+
+Ask the developer to open `<app_url>/me/api-keys` as a team **admin** and
+create a key named `passport-local-setup`. The app derives its permissions
+from the creator's team role; a member's key cannot create the demo catalog.
+The app shows the key once. Do not paste it
+into chat. Have the developer set `PASSPORT_API_KEY` in the shell that launches
+the agent, then start a new agent session from that shell. For example, in
+bash or zsh:
+
+```bash
+printf 'Paste temporary Passport API key: '
+IFS= read -rs PASSPORT_API_KEY; printf '\n'
+export PASSPORT_API_KEY
+claude
+```
+
+Use the developer's actual agent command in place of `claude`. In Windows
+PowerShell, in the shell that launches the agent:
+
+```powershell
+$secure = Read-Host 'Temporary Passport API key' -AsSecureString
+$ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+try { $env:PASSPORT_API_KEY = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) }
+finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr); $secure.Dispose() }
+claude
+```
+
+The environment variable is plaintext in either shell; this avoids chat and
+shell history, not access by the agent process.
+The agent must only check whether the variable is set, never print its value.
+If the agent is already running without the variable, stop and relaunch it;
+exporting in a separate terminal does not update a running agent.
+
+**Security tradeoff:** an environment variable is readable to this agent and
+other processes with access to its environment. The LLM or a tool can
+accidentally expose it. Use this key only for initial setup. After the e2e
+test, follow step 7.1 to replace it with a key held in Vault and revoke the
+bootstrap key. Do not put either key in a repo, command argument, or chat.
+
+Check that `PASSPORT_API_KEY` is present, `PASSPORT_API` points to the selected
+environment, and `passport whoami --json` reports the intended team. A public
+API key cannot identify its team; the developer must confirm in the app that
+they created it in that same team. A read of `/public/v1/namespaces` checks
+that the key works. Do not infer admin permission from that read.
+
+### 5.2 Build the demo through the public API
+
+Before a mutation, inspect `/tmp/pp-local/ids.env` and list namespaces. Reuse
+recorded objects only after verifying them. If the demo exists without a
+record, stop and inspect rather than creating a duplicate. Confirm in the app
+that the named proxy is Healthy, the zone's only proxy, and its default. The
+public API does not expose proxy registration or its key; do not claim it
+verified those details from an API response.
 
 ```bash
 cp "$SKILL_DIR/scripts/local-api.sh" /tmp/pp-local/local-api.sh
 . /tmp/pp-local/target.env
 export PASSPORT_API PASSPORT_DIR
+[ -n "${PASSPORT_API_KEY:-}" ] || { echo 'Start the agent with PASSPORT_API_KEY set.' >&2; exit 1; }
 api() { bash /tmp/pp-local/local-api.sh "$@"; }
 set -o pipefail
 cd /tmp/pp-local
-PROXY_NAME='<exact name created in the app>'
-PROXY_LIST=$(api GET /api/v2/tenant/config) || exit 1
-PROXY_ID=$(printf '%s' "$PROXY_LIST" | jq -er --arg n "$PROXY_NAME" \
-  '.body.data as $p | if ($p|length)==1 and $p[0].proxyName==$n and
-   $p[0].status=="healthy" and $p[0].isDefault==true and
-   ($p[0].publicKey // "")!="" then $p[0].proxyId
-   else error("expected one Healthy default proxy with this name") end') || exit 1
-WANT=$(openssl pkey -pubin -in reference-public-key.pem -outform DER | openssl dgst -sha256 | awk '{print $NF}')
-GOT=$(printf '%s' "$PROXY_LIST" | jq -r --arg p "$PROXY_ID" \
-  '.body.data[] | select(.proxyId==$p).publicKey' | openssl pkey -pubin -outform DER | openssl dgst -sha256 | awk '{print $NF}')
-[ "$WANT" = "$GOT" ] || { echo 'Registered key differs from local ref.pem; stop.' >&2; exit 1; }
-# Create the demo in its own namespace; do not reuse it for the developer's API.
-PP_USER=$(api user-id) || exit 1
-NS=$(api POST /api/v1/namespaces '{"name":"passport-proxy-local-dev-e2e","description":"Passport proxy e2e test"}' | jq -er '.body.data.id') || exit 1
-RG=$(api POST /api/v1/namespaces/$NS/resource-groups '{"name":"passport-demo.mock.postman.postman.dev","description":"Passport proxy e2e test","source":"manual"}' | jq -er '.body.data.id') || exit 1
-REF=$(api POST /api/v2/secret-references "$(jq -nc --arg ns "$NS" '{namespaceId:$ns,name:"demo",vaultType:"hashicorp",vaultKey:"demo-api-key"}')" | jq -er '.body.data.id') || exit 1
-EP=$(api POST /api/v2/resource-endpoints "$(jq -nc --arg ns "$NS" --arg r "$REF" --arg g "$RG" '{namespaceId:$ns,method:"GET",host:"passport-demo.mock.postman.postman.dev",path:"/",secrets:[{label:"x-demo-api-key",secretReferenceId:$r}],resourceGroupIds:[$g]}')" | jq -er '.body.data.id') || exit 1
-GR=$(api POST /api/v2/access-grants "$(jq -nc --arg u "$PP_USER" --arg ns "$NS" --arg e "$EP" '{userId:$u,namespaceId:$ns,endpointIds:[$e],reason:"passport proxy local e2e",validity:1}')" | jq -er '.body.data[0].id') || exit 1
-MISSING=; for v in PROXY_ID NS RG REF EP GR; do eval "x=\${$v:-}"; case "$x" in ''|null) MISSING="$MISSING $v";; esac; done
-if [ -z "$MISSING" ]; then printf 'PROXY_ID=%s\nNS=%s\nRG=%s\nREF=%s\nEP=%s\nGR=%s\n' "$PROXY_ID" "$NS" "$RG" "$REF" "$EP" "$GR" | tee ids.env
-else echo "INCOMPLETE, missing:$MISSING. Delete any IDs that were created, run 'passport auth status' (refreshes the token), re-run." >&2; fi
+[ ! -e ids.env ] || { echo 'Existing demo IDs found; inspect and resume, do not recreate.' >&2; exit 1; }
+api GET /public/v1/namespaces | jq -e '.body.pagination.nextCursor == null and ([.body.data[]? | select(.name == "passport-proxy-local-dev-e2e")] | length == 0)' >/dev/null ||
+  { echo 'Demo namespace already exists; inspect before creating.' >&2; exit 1; }
+record() { printf '%s=%s\n' "$1" "$2" >> ids.env; }
+NS=$(api POST /public/v1/namespaces '{"name":"passport-proxy-local-dev-e2e","description":"Passport proxy e2e test"}' | jq -er '.body.data.id') || exit 1
+record NS "$NS"
+RG=$(api POST "/public/v1/namespaces/$NS/resource-groups" '{"name":"passport-demo.mock.postman.postman.dev","description":"Passport proxy e2e test","source":"manual"}' | jq -er '.body.data.id') || exit 1
+record RG "$RG"
+REF=$(api POST "/public/v1/namespaces/$NS/secret-references" '{"name":"demo","vaultType":"hashicorp","vaultKey":"demo-api-key"}' | jq -er '.body.data.id') || exit 1
+record REF "$REF"
+EP=$(api POST "/public/v1/namespaces/$NS/endpoints" "$(jq -nc --arg r "$REF" --arg g "$RG" '{method:"GET",host:"passport-demo.mock.postman.postman.dev",path:"/",secrets:[{label:"x-demo-api-key",secretReferenceId:$r}],resourceGroupIds:[$g]}')" | jq -er '.body.data.id') || exit 1
+record EP "$EP"
 ```
 
 > **The resource group is what makes the endpoint visible in the web UI**
 > (`concepts.md`, "Endpoints", also shows how to attach one to an existing
 > endpoint).
 
-`ids.env` keeps the IDs for step 7 and explicitly requested cleanup. Do not
-delete the named proxy merely because the demo test ended.
+Each successful create records its ID immediately. If a later call fails,
+inspect recorded IDs and resume from the failed step; do not rerun the whole
+block. Keep the named proxy when cleaning up the demo.
+
+### 5.3 Request access and check its grant
+
+The key belongs to the developer, so omit `email` and `requesterId`: the
+request is for the key's owner. The service normally auto-approves an admin's
+request for themselves. The agent verifies `approved` and finds the grant.
+If it remains `pending`, ask the developer to decide it in the app. Never
+call the approve endpoint for the agent's own request. `passport setup`
+cannot issue access that does not exist.
+
+```bash
+. /tmp/pp-local/target.env; export PASSPORT_API
+api() { bash /tmp/pp-local/local-api.sh "$@"; }
+. /tmp/pp-local/ids.env
+AR=$(api POST /public/v1/access-requests "$(jq -nc --arg ns "$NS" --arg ep "$EP" '{namespaceId:$ns,entities:[{type:"resource_endpoint",id:$ep}],message:"Local Passport demo",durationDays:7}')" | jq -er '.body.data.id') || exit 1
+printf 'AR=%s\n' "$AR" >> /tmp/pp-local/ids.env
+# Check immediately; if pending, wait for the developer's decision in the app.
+api GET "/public/v1/access-requests/$AR" | jq -e '.body.data.status == "approved"' || exit 1
+GR=$(api GET "/public/v1/access-grants?namespaceId=$NS&scopeType=endpoint&status=active" | jq -er --arg ar "$AR" --arg ep "$EP" '.body.data[] | select(.reason == ("access_request:" + $ar) and .scopeValue == $ep) | .id') || exit 1
+printf 'GR=%s\n' "$GR" >> /tmp/pp-local/ids.env
+```
+
+Check `pagination.nextCursor` before concluding the grant is absent. Never
+re-submit a request merely because approval is still pending. Show whether
+`autoApproved` was true; do not imply a person approved it when the service
+did so.
 
 ---
 
@@ -479,12 +553,79 @@ look at the app. Continue with step 7.1.
 
 ---
 
-### 7.1 Next: show the value, add an API
+### 7.1 Replace the bootstrap API key
+
+After the demo succeeds, the developer creates a second admin
+key at `<app_url>/me/api-keys`, named `passport-local-ongoing`. They enter its
+value into local Vault with `scripts/local-vault-put.sh passport-api-key` (or
+the PowerShell equivalent). The agent never receives this new key. Vault dev
+mode loses the key on restart, so it is not durable production storage.
+
+While the bootstrap key still works, the agent creates a second resource
+group, reference, and endpoint under the demo namespace. This endpoint covers
+`* <api_url>/public/v1/*`; its `Authorization` slot maps to Vault key
+`passport-api-key`. This is broad authority over the public API, matching the
+admin key. Explain that scope to the developer before creating it.
+Record each ID immediately as in step 5. Check for an
+existing record before rerunning after a partial failure.
+
+```bash
+cd /tmp/pp-local; . ./target.env; export PASSPORT_API PASSPORT_DIR
+. ./ids.env
+api() { bash /tmp/pp-local/local-api.sh "$@"; }
+case "$PASSPORT_API" in https://*) ;; *) echo 'Expected an HTTPS API URL.' >&2; exit 1;; esac
+API_HOST=${PASSPORT_API#https://}; API_HOST=${API_HOST%%/*}
+API_RG=$(api POST "/public/v1/namespaces/$NS/resource-groups" "$(jq -nc --arg h "$API_HOST" '{name:$h,description:"Passport API key rotation",source:"manual"}')" | jq -er '.body.data.id') || exit 1
+printf 'API_RG=%s\n' "$API_RG" >> ids.env
+API_REF=$(api POST "/public/v1/namespaces/$NS/secret-references" '{"name":"passport-api-key","vaultType":"hashicorp","vaultKey":"passport-api-key"}' | jq -er '.body.data.id') || exit 1
+printf 'API_REF=%s\n' "$API_REF" >> ids.env
+API_EP=$(api POST "/public/v1/namespaces/$NS/endpoints" "$(jq -nc --arg h "$API_HOST" --arg g "$API_RG" --arg r "$API_REF" '{method:"*",host:$h,path:"/public/v1/*",resourceGroupIds:[$g],secrets:[{label:"Authorization",secretReferenceId:$r}]}')" | jq -er '.body.data.id') || exit 1
+printf 'API_EP=%s\n' "$API_EP" >> ids.env
+API_AR=$(api POST /public/v1/access-requests "$(jq -nc --arg ns "$NS" --arg ep "$API_EP" '{namespaceId:$ns,entities:[{type:"resource_endpoint",id:$ep}],message:"Use Passport API key through local proxy",durationDays:7}')" | jq -er '.body.data.id') || exit 1
+printf 'API_AR=%s\n' "$API_AR" >> ids.env
+```
+
+The agent checks for auto-approval as in step 5. If pending, the developer
+decides it in the app. The agent records the new grant as `API_GR` and runs
+`passport setup` again.
+Then it tests the replacement key through the proxy, without printing the
+response or the key:
+
+```bash
+cd /tmp/pp-local; . ./target.env; export PASSPORT_API PASSPORT_DIR
+. ./ids.env
+api() { bash /tmp/pp-local/local-api.sh "$@"; }
+api GET "/public/v1/access-requests/$API_AR" | jq -e '.body.data.status == "approved"' >/dev/null || exit 1
+API_GR=$(api GET "/public/v1/access-grants?namespaceId=$NS&scopeType=endpoint&status=active" | jq -er --arg ar "$API_AR" --arg ep "$API_EP" '.body.data[] | select(.reason == ("access_request:" + $ar) and .scopeValue == $ep) | .id') || exit 1
+printf 'API_GR=%s\n' "$API_GR" >> ids.env
+passport setup --management-url http://passport-management.localhost --proxy-url https://passport-proxy.localhost || exit 1
+( unset PASSPORT_API_KEY; export PASSPORT_API_KEY_REF=$API_REF; api GET /public/v1/namespaces | jq -e '.body.data | type == "array"' >/dev/null ) || exit 1
+```
+
+The helper uses explicit proxy and certificate flags plus `--noproxy ''` for
+the reference case. This avoids the normal `.usepassport.ai` proxy bypass.
+If the app/CLI selected localhost ports instead of the named URLs, set
+`PASSPORT_PROXY_URL` to that chosen proxy URL and use the matching setup URL.
+The helper uses the current CLI certificate; run `passport setup` to refresh
+it after expiry or a grant change. The approved grant expires after seven
+days, so access must be requested and granted again before then.
+
+Only after that check succeeds, the developer revokes `passport-local-setup`
+in the app. Unset `PASSPORT_API_KEY`, set `PASSPORT_API_KEY_REF` to the new
+reference UUID, and restart the agent with the reference variable. The local
+API helper then sends that pointer through the proxy; it never reads the new
+key. Verify a public API read through this helper before further writes. If the
+replacement check fails, keep the bootstrap key until it is fixed and report
+that rotation is incomplete. This rotation path is **not yet verified end to
+end**; never claim the API key is protected by Vault without the proxied test.
+
+### 7.2 Next: see what was made, add an API
 
 Continue with **`guides/after-setup.md`**, which is shared with the AWS setup.
-Use its *Local Docker* load block. First guide the developer through **“See
-what was created”** in the app, then offer to add their own API through the
-agent or the app.
+First guide the developer through **“See what was created”** in the app. The
+tour shows proxy settings, namespace, resource group and endpoint, secret
+reference, and access. Point to the objects actually created and the working
+request, then offer **“Add your own API”** through the agent or the app.
 
 ---
 
@@ -495,22 +636,29 @@ containers, the network, and (if full e2e was done) real objects in your
 Passport Cloud team — none of that should happen just because a test
 finished or a step succeeded.
 
-If you added APIs through the agent (`guides/after-setup.md`, part 2), delete
-those first (grant → endpoint → group → secret reference → namespace), and
-stop the daemon:
+If you added your own APIs, delete their recorded objects first through the
+public API. Then delete the demo objects in dependency order. Do not run
+cleanup without a working API key source (`PASSPORT_API_KEY` or the verified
+`PASSPORT_API_KEY_REF`), and review any extra objects made during rotation.
+For complete cleanup, use a fresh temporary admin key in `PASSPORT_API_KEY`:
+deleting the endpoint that carries the Vault-held key removes the agent's
+ability to make later API calls through that reference. Revoke the temporary
+cleanup key in the app when deletion is verified.
 
 ```bash
 cd /tmp/pp-local; . ./target.env; export PASSPORT_API PASSPORT_DIR
 api() { bash /tmp/pp-local/local-api.sh "$@"; }
-[ -f resources.env ] && while read -r m u rest; do
-  eval "$rest"   # sets NS_N NS_CREATED RG REF EP GR
-  api DELETE /api/v2/access-grants/$GR; api DELETE /api/v2/resource-endpoints/$EP
-  api DELETE /api/v1/resource-groups/$RG; api DELETE /api/v2/secret-references/$REF
-done < resources.env
-# Remove a shared, newly created access group only after all its APIs are gone.
-[ -f resources.env ] && sed -n 's/.*NS_CREATED=1 .*/&/p' resources.env | sed -n 's/.*NS_N=\([^ ]*\).*/\1/p' | sort -u | while read -r NS_ID; do
-  api DELETE /api/v1/namespaces/$NS_ID
-done
+[ -f ids.env ] || { echo 'Demo IDs missing; inspect the app before cleanup.' >&2; exit 1; }
+. ./ids.env
+[ -z "${API_GR:-}" ] || api DELETE "/public/v1/access-grants/$API_GR"
+[ -z "${GR:-}" ] || api DELETE "/public/v1/access-grants/$GR"
+[ -z "${API_EP:-}" ] || api DELETE "/public/v1/endpoints/$API_EP"
+[ -z "${EP:-}" ] || api DELETE "/public/v1/endpoints/$EP"
+[ -z "${API_RG:-}" ] || api DELETE "/public/v1/resource-groups/$API_RG"
+[ -z "${RG:-}" ] || api DELETE "/public/v1/resource-groups/$RG"
+[ -z "${API_REF:-}" ] || api DELETE "/public/v1/secret-references/$API_REF"
+[ -z "${REF:-}" ] || api DELETE "/public/v1/secret-references/$REF"
+[ -z "${NS:-}" ] || api DELETE "/public/v1/namespaces/$NS"
 passport daemon stop
 ```
 

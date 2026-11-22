@@ -4,6 +4,30 @@ The guides link here for the *why*. The rules an agent must follow are in
 `SKILL.md`; symptoms and fixes are in `troubleshooting.md`; what has been
 tested, and when, is in `verification.md`.
 
+## Small glossary for local onboarding
+
+| Term | What it means in this setup |
+|---|---|
+| Team / organization | The people and catalog sharing one `org_…` identity. |
+| Zone | A deployment boundary inside a team. The fresh local UI path uses its existing default zone; the skill does not create one. |
+| Proxy settings | The app's record for the local proxy. The proxy uses its one-time token to register itself there. |
+| Vault | HashiCorp Vault running locally in Docker. It holds actual secret values. |
+| Namespace / access group | A named collection of related APIs and their access rules. |
+| Resource group | One API host inside a namespace, with its endpoints. |
+| Endpoint | A method, host and path that Passport protects. |
+| Secret reference | A UUID pointing to a Vault key; Passport stores the location, not the secret value. |
+| Access request and grant | The agent requests access; an admin's request for themselves can auto-approve. The resulting time-limited grant lets the CLI issue a usable certificate. |
+| Client certificate | Created by `passport setup`; tells the proxy which endpoints this developer may call. |
+
+For the local demo, make these in order: Vault value → proxy registration →
+namespace → resource group → secret reference → endpoint → access request →
+approved grant (automatic for admin self-request, otherwise human decision) →
+certificate → proxied request. The app's **“See
+what was created”** tour follows the resulting proxy, namespace, resource
+group/endpoint, reference and access. Keep this glossary in the plugin so the
+agent can follow it even when public docs are unavailable. Consult public
+docs for extra context, but check API paths against the selected public API.
+
 ## How a request is allowed
 
 ```
@@ -43,11 +67,9 @@ on the `org` line of `passport auth status`.
   wiped), references created earlier can't be decrypted. Create new ones.
   Don't reuse an old registration whose `publicKey` differs from your current
   key; leave it in place unless the user says to delete it.
-- **Repairing a reference:** make your proxy the default
-  (`api PUT /api/v2/tenant/config/<your proxyId> '{"isDefault":true}'`),
-  re-encrypt the reference
-  (`api PUT /api/v2/secret-references/<ref> '{"vaultKey":"<its vault key>"}'`),
-  run `passport setup` again, then restore the previous default.
+- **Repairing a reference:** the local flow stops if its sole proxy is not
+  the default. The AWS guide has its own default-switch and re-encryption
+  procedure. Do not use an internal API login token to repair local setup.
 
 ## Endpoints
 
@@ -60,9 +82,8 @@ on the `org` line of `passport auth status`.
   page lists resource groups, then the endpoints inside each one. An endpoint
   created without `resourceGroupIds` works through the proxy but never shows
   in Passport Cloud. `source:"manual"` is what the web UI's **Manual** flow
-  uses. To attach a group to an existing endpoint (a `PUT` changes only the
-  fields you send):
-  `api PUT /api/v2/resource-endpoints/<id> "$(jq -nc --arg g "$RG" '{resourceGroupIds:[$g]}')"`
+  uses. For local changes, use the public endpoint update operation in the
+  `passport-public-api` skill and preserve existing secret bindings.
 - **`{{vault:…}}` takes the reference's UUID, not its name.** A name passes
   through unchanged, with no error.
 - **Where the pointer can go:** headers and query parameters are tested. For a
