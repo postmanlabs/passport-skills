@@ -8,7 +8,7 @@
 
 | Symptom | Cause / fix |
 |---|---|
-| `passport login` fails with `authenticated login session has no organization` | Your account has no Passport team yet. Retrying `login` won't show a team-creation screen, and the CLI's hint to "select an organization" is misleading. Create a team at <https://app.usepassport.ai/dashboard>, then run `passport login` again (local 1.1, AWS 1.1). |
+| `passport login` fails with `authenticated login session has no organization` | Check that the selected app shows your team. If it does not, use its **Create team** action, then run `passport login` again. Retrying `login` alone won't show a team-creation screen (local 0 and 1.1, AWS 1.1). |
 | `api` prints `token expired`, an `api: … -> 401` line, or `st: refusing to record empty value` | The login token (about an hour) expired, or the call before it failed (its error is printed as `api: <method> <path> -> <status> …`). Run `passport auth status` (it refreshes the token; AWS on an MDM Mac: `cli auth status`), then re-run. AWS step 6 skips everything already recorded. |
 | `setup: invalid management URL: expected an HTTPS origin (or http://localhost for local dev)` | Local: `http://localhost:8081`. AWS: the CloudFront URL `https://$CF_DOMAIN`. |
 | `passport setup` exits `2` | Partial success: credentials are fine, but the daemon or environment step failed. Read setup's output and fix that part. Setup is **not complete** (AWS 8.4). |

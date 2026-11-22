@@ -64,9 +64,9 @@ each command runs in a fresh shell.
 - **The proxy token and any real secret are human-only inputs.** The developer
   enters each in their terminal's hidden prompt; never ask them to paste it
   into chat.
-- **Public API bootstrap key:** the developer creates an organization-owned key
-  in the selected app and puts it in `PASSPORT_API_KEY` before starting the
-  agent. It is temporarily readable by the agent's process. Never print it,
+- **Public API bootstrap key:** the developer creates a user-owned admin key
+  in the selected app at step 5.1 and relaunches the agent with
+  `PASSPORT_API_KEY` set. It is temporarily readable by the agent's process. Never print it,
   inspect `passportrc`, or use the CLI's access/refresh tokens for API calls.
 - **The browser approvals** (`passport login`) are the user's. Show the login
   link on its own line, as a full `https://` URL with the confirmation code. If
@@ -92,9 +92,8 @@ approval before installing or pulling anything.
 - **Docker Desktop (or another Docker daemon), running:** runs the Passport proxy,
   which sends approved API requests, and a temporary HashiCorp Vault, which holds
   the secrets used in those requests. Vault dev mode loses its secrets on restart.
-- **Passport account and team:** open `<app_url>/signup?origin=agent` for a new
-  account, or open the selected `app_url` to sign in. Read `APP_URL` from
-  `target.env` and give the developer the full link.
+- **Passport account and team:** complete step 0 in the selected app before
+  running `passport login`.
 - **`openssl`:** creates the proxy's private keys. **`curl`:** downloads the CLI
   installer and tests the request through the proxy. **`jq`:** reads API responses
   while creating and checking the demo setup. **`ping`:** checks local name resolution.
@@ -115,10 +114,26 @@ No Node.js installation is needed for this path.
 
 ---
 
-## 1. Install and log in to the Passport CLI
+## 0. Create or select your Passport team
 
-Create or select a team in the app before logging in to the CLI. Keep
-`?origin=agent` in the app link so its setup copy matches this path.
+Ask whether the developer already has a Passport account with a team. For a
+new account, ask for a team name; suggest “<first name>’s Passport Team”. Read
+`APP_URL` from `target.env` and give them the full `<app_url>/signup?origin=agent`
+link. Have them enter the chosen team name on the signup page and finish
+signup. Wait until the app shows their team and setup page before continuing.
+
+For an existing account, have them open `<app_url>/setup?origin=agent`, sign
+in, and confirm the intended team is shown. If the account has no team, ask
+for a name (suggest the same format) and have them use the app's **Create
+team** action. A signed-in user should create the team there, not revisit
+signup. The `origin=agent` link makes the app show the agent setup copy.
+
+`passport login` in step 1 authorizes the CLI for this existing account and
+team. It must not be the first signup step.
+
+---
+
+## 1. Install and log in to the Passport CLI
 
 Check the active `passport --help` and all copies on PATH first. The Enterprise
 CLI has `login` and `setup`; the Community CLI has `lens`. If the intended
@@ -169,8 +184,10 @@ the demo access is granted (step 6).
 
 ### 1.1 Confirm you have a team
 
-If `login` says `authenticated login session has no organization`, create a
-Passport **team** at `<app_url>` and re-run `passport login`.
+If `login` says `authenticated login session has no organization`, return to
+the selected app and check that the intended team was created or selected.
+If the account has no team, use the app's **Create team** action, then re-run
+`passport login`.
 
 Retrying `passport login` does **not** surface any team-selection or
 team-creation screen, even on a fresh account. The CLI's own hint ("select an

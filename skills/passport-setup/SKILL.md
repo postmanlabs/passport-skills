@@ -25,7 +25,8 @@ When the user says **"setup passport"** (or similar: "set up the Passport proxy"
    `AskUserQuestion`) to ask **"Who is this setup for?"** with these two options,
    without preselecting or recommending either. Explain the tools needed for the
    chosen path before installing them:
-   - **One developer** → follow `guides/local-docker.md`
+   - **One developer** → follow `guides/local-docker.md`. Start with its team
+     step before installing or logging in to the CLI.
    - **Team deployment on AWS** → follow `guides/aws-single-instance.md`
 2. Follow that guide **literally**. Do agent steps yourself and hand the
    marked browser, token and secret-entry steps to the developer. The ground rules below apply to both
