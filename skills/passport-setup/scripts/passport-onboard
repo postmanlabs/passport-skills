@@ -22,6 +22,7 @@ SAMPLE_KEY=sdfdsfdsfsdfdfsdfds
 DEMO_NS=passport-proxy-local-e2e
 HANDSON_NS=passport-api
 HANDSON_SECRET=passport-api-key
+DEMO_RG="Passport demo API" HANDSON_RG="Passport public API"   # a Resource Group is named for its API
 API_HOST=${PASSPORT_API_URL#https://}; API_HOST=${API_HOST%%/*}
 STAGES="welcome setup-type machine-check account vault proxy cli demo tour handson"
 STAGE=status
@@ -209,7 +210,7 @@ cmd_doctor() {
     case $t in
       curl) p="Calls the Passport API and downloads the CLI";;
       jq) p="Reads the Passport API's JSON replies";;
-      openssl) p="Creates the Proxy's two private keys";;
+      openssl) p="Creates the Proxy's two private keys: one signs your client certificate, one decrypts Secret References";;
     esac
     if command -v "$t" >/dev/null 2>&1; then row "$t" "$p" ok; else row "$t" "$p" missing "$(pkg "$t")"; fi
   done
@@ -217,27 +218,22 @@ cmd_doctor() {
   if command -v passport >/dev/null 2>&1; then
     v=$(passport --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
     if [ -z "$v" ] || version_lt "$v" "$PASSPORT_CLI_MIN_VERSION"; then
-      row passport "Signs you in and sends requests through the Proxy" outdated "Needs $PASSPORT_CLI_MIN_VERSION or newer (found ${v:-unknown}). Update: $fix"
-    else row passport "Signs you in and sends requests through the Proxy" ok; fi
+      row "Passport CLI" "Signs you in and sends requests through the Proxy" outdated "Needs $PASSPORT_CLI_MIN_VERSION or newer (found ${v:-unknown}). Update: $fix"
+    else row "Passport CLI" "Signs you in and sends requests through the Proxy" ok; fi
     if command -v npm >/dev/null 2>&1 && npm ls -g @postman/postman-passport >/dev/null 2>&1; then
-      row "passport (npm)" "Old community edition of the CLI; conflicts with the real one" conflict "npm uninstall -g @postman/postman-passport"
+      row "Passport CLI (npm)" "Old community edition of the CLI; conflicts with the real one" conflict "npm uninstall -g @postman/postman-passport"
     fi
     n=$(type -a passport 2>/dev/null | sort -u | wc -l | tr -d ' ')
-    [ "$n" -gt 1 ] && row "passport (PATH)" "More than one passport on PATH; the first one runs" info "$(type -a passport | sort -u | tr '\n' ';')"
+    [ "$n" -gt 1 ] && row "Passport CLI (PATH)" "More than one passport on PATH; the first one runs" info "$(type -a passport | sort -u | tr '\n' ';')"
   else
-    row passport "Signs you in and sends requests through the Proxy" missing "$fix"
+    row "Passport CLI" "Signs you in and sends requests through the Proxy" missing "$fix"
   fi
   for t in 8443 8081; do
     if port_busy "$t" && ! running "$PROXY_C"; then row "port $t" "The Proxy listens here" in-use "Stop whatever uses 127.0.0.1:$t, then check again"; fi
   done
-  if { running "$PROXY_C" || { ! port_busy 443 && ! port_busy 80; }; } && resolves passport-proxy.localhost && resolves passport-management.localhost; then
-    row "Proxy address" "Your Proxy will be at https://passport-proxy.localhost" info
-  else
-    row "Proxy address" "Your Proxy will be at https://localhost:8443" info
-  fi
+  # Environment checks get a row only when they fail; the table is about tools.
   t=$(curl -s -m 15 -o /dev/null -w '%{http_code}' "$PASSPORT_API_URL/llms.txt" 2>/dev/null)
-  if [ "$t" = 200 ]; then row "Passport Cloud" "Holds your rules" ok
-  else row "Passport Cloud" "Holds your rules" unreachable "Can't reach $PASSPORT_API_URL (got ${t:-no reply}). Check your network or VPN."; fi
+  [ "$t" = 200 ] || row "Passport Cloud" "Holds your rules" unreachable "Can't reach $PASSPORT_API_URL (got ${t:-no reply}). Check your network or VPN."
   if command -v jq >/dev/null 2>&1 && ! $blocking; then state_init; mark_done machine-check; fi
   if $blocking; then emit "{\"ready\":false,\"checks\":[$rows]}" user "Some tools are missing or need attention" "passport-onboard doctor"
   else emit "{\"ready\":true,\"checks\":[$rows]}"; fi
@@ -328,7 +324,7 @@ proxy_urls() { # sets PUB_URL MGMT_URL from free ports and *.localhost resolutio
 proxy_prepare() {
   need openssl jq; state_init
   [ -s "$ONB/vault/root-token" ] || die 3 vault_first "Set up HashiCorp Vault first: passport-onboard vault up"
-  (umask 077; mkdir -p "$ONB/keys"
+  (umask 077; mkdir -p "$ONB/keys" "$ONB/audit"
    [ -s "$ONB/keys/ca.pem" ] || openssl genrsa -out "$ONB/keys/ca.pem" 2048 2>/dev/null
    [ -s "$ONB/keys/ref.pem" ] || openssl genrsa -out "$ONB/keys/ref.pem" 2048 2>/dev/null) \
     || die 1 keygen "openssl couldn't create the Proxy's keys"
@@ -392,7 +388,7 @@ proxy_start() {
   need docker jq
   local f=$ONB/proxy.env sha i ports
   [ -s "$f" ] || die 3 prepare_first "Run: passport-onboard proxy prepare"
-  # PASSPORT_PROXY_ID stays optional: the beta Proxy learns its ID from the token.
+  [ -n "$(env_get "$f" PASSPORT_PROXY_ID)" ] || die 2 proxy_id_empty "PASSPORT_PROXY_ID in $f is still empty"
   [ -n "$(env_get "$f" PASSPORT_PROXY_TOKEN)" ] || die 2 proxy_token_empty "PASSPORT_PROXY_TOKEN in $f is still empty"
   [ -n "$(env_get "$f" PASSPORT_PROXY_ALLOWED_TEAM_IDS)" ] || die 3 team_unknown "Team ID not known yet. Run: passport-onboard key check"
   vault_ok || die 3 vault_down "HashiCorp Vault isn't running. Run: passport-onboard vault up"
@@ -411,7 +407,7 @@ proxy_start() {
     [ "$(env_get "$f" PASSPORT_PROXY_PUBLIC_URL)" = https://passport-proxy.localhost ] && ports+=(-p 127.0.0.1:443:8443 -p 127.0.0.1:80:8081)
     docker run -d --name "$PROXY_C" --label "$LABEL=1" --label "$LABEL.env=$sha" --network "$NET" \
       --restart unless-stopped --user "$(id -u):$(id -g)" "${ports[@]}" \
-      -v "$ONB/keys:/keys:ro" --env-file "$f" "$PASSPORT_PROXY_IMAGE" >/dev/null 2>&1 \
+      -v "$ONB/keys:/keys:ro" -v "$ONB/audit:/audit" --env-file "$f" "$PASSPORT_PROXY_IMAGE" >/dev/null 2>&1 \
       || die 1 proxy_run "docker run failed for the Proxy. Check ports 8443/8081 (and 443/80) are free."
   fi
   for i in $(seq 1 60); do
@@ -453,7 +449,7 @@ cmd_demo() {
   case ${1:-} in
     plan) emit "{\"objects\":[
       {\"type\":\"Namespace\",\"name\":\"$DEMO_NS\"},
-      {\"type\":\"Resource Group\",\"name\":\"$PASSPORT_DEMO_API_HOST\"},
+      {\"type\":\"Resource Group\",\"name\":\"$DEMO_RG\",\"host\":\"$PASSPORT_DEMO_API_HOST\"},
       {\"type\":\"Secret Reference\",\"name\":\"demo\",\"vaultPath\":\"secret/demo-api-key\"},
       {\"type\":\"Endpoint\",\"method\":\"GET\",\"host\":\"$PASSPORT_DEMO_API_HOST\",\"path\":\"/\",\"slot\":\"x-demo-api-key\"},
       {\"type\":\"Access Request\",\"durationDays\":7}]}";;
@@ -469,9 +465,9 @@ demo_apply() {
   reused=true; [ -n "$ns" ] || { reused=false
     ns=$(create /public/v1/namespaces "$(jq -nc --arg n "$DEMO_NS" '{name:$n,description:"Passport onboarding demo"}')") || die 1 api_error "Creating the Namespace failed. $(api_err)"; }
   sset '.demo.ns = $v' "$ns"; add Namespace "$ns" $reused
-  rg=$(find_id "/public/v1/namespaces/$ns/resource-groups" '.name == $v' "$PASSPORT_DEMO_API_HOST") || die 1 api_error "Listing Resource Groups failed. $(api_err)"
+  rg=$(find_id "/public/v1/namespaces/$ns/resource-groups" '.name == $v' "$DEMO_RG") || die 1 api_error "Listing Resource Groups failed. $(api_err)"
   reused=true; [ -n "$rg" ] || { reused=false
-    rg=$(create "/public/v1/namespaces/$ns/resource-groups" "$(jq -nc --arg n "$PASSPORT_DEMO_API_HOST" '{name:$n,description:"Passport onboarding demo",source:"manual"}')") || die 1 api_error "Creating the Resource Group failed. $(api_err)"; }
+    rg=$(create "/public/v1/namespaces/$ns/resource-groups" "$(jq -nc --arg n "$DEMO_RG" '{name:$n,description:"Passport onboarding demo",source:"manual"}')") || die 1 api_error "Creating the Resource Group failed. $(api_err)"; }
   sset '.demo.rg = $v' "$rg"; add "Resource Group" "$rg" $reused
   ref=$(find_id "/public/v1/namespaces/$ns/secret-references" '.name == $v' demo) || die 1 api_error "Listing Secret References failed. $(api_err)"
   reused=true; [ -n "$ref" ] || { reused=false
@@ -520,7 +516,7 @@ cmd_handson() {
   case ${1:-} in
     plan) emit "{\"vault\":{\"mount\":\"secret\",\"path\":\"$HANDSON_SECRET\",\"key\":\"value\",\"ui\":$(js "$(vault_ui)")},\"objects\":[
       {\"type\":\"Namespace\",\"name\":\"$HANDSON_NS\"},
-      {\"type\":\"Resource Group\",\"name\":\"$API_HOST\"},
+      {\"type\":\"Resource Group\",\"name\":\"$HANDSON_RG\",\"host\":\"$API_HOST\"},
       {\"type\":\"Secret Reference\",\"name\":\"$HANDSON_SECRET\",\"vaultType\":\"hashicorp\",\"vaultPath\":\"$HANDSON_SECRET\"},
       {\"type\":\"Endpoint\",\"method\":\"*\",\"host\":\"$API_HOST\",\"path\":\"/public/v1/*\",\"slot\":\"Authorization\",\"slotSecretReference\":\"$HANDSON_SECRET\",\"requestHeader\":\"Authorization: Bearer {{vault:<Secret Reference ID>}}\"},
       {\"type\":\"Access Request\",\"on\":\"the Resource Group\",\"durationDays\":90}]}";;

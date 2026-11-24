@@ -24,12 +24,17 @@ Menu, header "Setup type":
 - **"A team (coming soon)"**: "Hosted in the cloud and shared by the whole team."
 
 A team: say it's coming soon and offer the same menu again with "Stop for now".
-Then `passport-onboard mark setup-type`.
+Just me: `passport-onboard mark setup-type`, then say: **"By the end you'll
+have a Proxy and HashiCorp Vault running in Docker on this machine, the
+Passport CLI signed in, a working demo call, and you'll have done one full
+cycle yourself: stored a secret, registered an API, and called it with only a
+pointer."**
 
 ## 3. Machine check — agent, the user approves installs
 
 1. `passport-onboard doctor`. Show `data.checks` as a table: tool, why it's
-   needed here, status. Never hide a row.
+   needed here, status. Never hide a row. Rows other than tools (a busy port,
+   Passport Cloud unreachable) appear only when they fail.
 2. All `ok`/`info`: go on. Otherwise menu, header "Missing":
    **"Install what's missing"** / **"I'll do it myself"**.
 3. Install only after a yes. Run `brew install …` yourself. Anything with `sudo`,
@@ -56,8 +61,7 @@ Wait until they say they're signed in, then `passport-onboard mark account`.
 ## 5. Local Vault — agent
 
 Say first: **"I'm starting HashiCorp Vault in Docker on this machine. It holds
-the real secret values; Passport Cloud never sees them. Its data lives on a
-Docker volume, and it unlocks itself whenever it starts."**
+the real secret values; Passport Cloud never sees them."**
 
 Run `passport-onboard vault up`. Report the container, the Vault UI address
 (`data.ui`) and that the demo secret is stored at `secret/demo-api-key`.
@@ -77,36 +81,42 @@ Run `passport-onboard vault up`. Report the container, the Vault UI address
    `GET /public/v1/me` ships (see `troubleshooting.md`). When it passes, say:
    **"Your key works. One thing to know: keeping an API key in a file like this
    isn't safe — any program running as you, including me, can read it. That's
-   the exact problem Passport solves. In the hands-on step you'll move a new key
-   into HashiCorp Vault and revoke this one."**
+   the exact problem Passport solves. In the Hands-on step at the end you'll
+   move a new key into HashiCorp Vault and revoke this one."**
 4. The Proxy Configuration. Say: **"In the Passport app, open Proxy
-   Configuration and create one; pick any name. The app shows a one-time
-   registration token: it proves this Proxy belongs to your team, which is why
-   you create it there and I can't. Paste it into
-   `~/.passport/onboarding/proxy.env` after `PASSPORT_PROXY_TOKEN=`, and the
-   Proxy ID after `PASSPORT_PROXY_ID=` if the app shows one. Everything else in
-   that file is already filled in; read it to see how your Proxy is
-   configured."** Open the file for them.
+   Configuration and create one; pick any name. Copy its Proxy ID and
+   registration token into `~/.passport/onboarding/proxy.env`, after
+   `PASSPORT_PROXY_ID=` and `PASSPORT_PROXY_TOKEN=`. Everything else in that
+   file is already filled in; read it to see how your Proxy is configured."**
+   Open the file for them.
 5. When they say done: `passport-onboard proxy start`. It waits up to 60 s for
    the Proxy to register. Report `data.proxyUrl`. If `data.cloudStatus` is
    null, ask them to check the Proxy shows Healthy in the app. Then say:
-   **"Your Proxy also has a console with its audit log at `<data.consoleUrl>`.
-   Sign in as `admin` with password `passport-local`; `proxy.env` says how to
-   change it."**
+   **"Your Proxy also has a console at `<data.consoleUrl>`. Its audit log lists
+   every request the Proxy allowed or refused; the Proxy writes it to
+   `~/.passport/onboarding/audit/audit.jsonl`. Sign in with:**
+
+   ```text
+   Username: admin
+   Password: passport-local
+   ```
+
+   **`proxy.env` says how to change the password."**
 
 ## 7. CLI sign-in — agent, the user approves in the browser
 
 Say first: **"Next I'll run `passport login`. It opens your browser to sign
-in, finds your Proxy, and gets the certificate your requests use. It may also
-set up a small background helper and `HTTPS_PROXY`, so other tools on this
-machine can route through the Proxy."**
+in, finds your Proxy, and gets the client certificate your requests use. It
+may also start the Passport daemon and set `HTTPS_PROXY`, so other tools on
+this machine can route through the Proxy."**
 
 Run `passport login`, wait for it to finish, then `passport-onboard cli check`.
 
 ## 8. Demo — agent, plan shown first
 
 1. `passport-onboard demo plan`. Show the five objects as a table before
-   creating anything. The Access Request is for 7 days because the demo is
+   creating anything. The Resource Group is named for the API
+   (`Passport demo API`); the Endpoint is the method, host and path. The Access Request is for 7 days because the demo is
    short-lived; say so in one line.
 2. Menu, header "Demo": **"Create these"** / **"Stop for now"**.
 3. `passport-onboard demo apply`. Show one line per object: type, ID, and
@@ -144,7 +154,7 @@ key."** Run `passport-onboard handson plan` for the values below.
 2. **Create these in the app, in this order.** Name only the objects and
    values; the app's screens are changing.
    1. Namespace `passport-api`. It holds everything below.
-   2. Resource Group for the host `<API host>`, the API being protected.
+   2. Resource Group `Passport public API`, for the API being protected.
    3. Secret Reference `passport-api-key`: vault type HashiCorp, path
       `passport-api-key`. It must exist before an Endpoint can send it.
    4. Endpoint: method `*`, host `<API host>`, path `/public/v1/*`, in that

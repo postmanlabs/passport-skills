@@ -11,15 +11,15 @@ they live only in this table.
 
 | Term | What it is | In the app | In the public API |
 |---|---|---|---|
-| Passport Cloud | The hosted control plane. Holds the rules (who may call what) and never sees a secret value. | — | `api_url` |
-| Proxy | Runs on your machine in Docker. Checks each request against your Access Grants and swaps `{{vault:<id>}}` for the real value on the way out. | — | — |
+| Passport Cloud | The hosted Passport Control Plane. Holds the rules (who may use which secret, on which API, for which operation) and never sees a secret value. | — | `api_url` |
+| Proxy | The data plane, in your network next to HashiCorp Vault (for one developer, in Docker on their machine). Checks each request against your Access Grants, swaps `{{vault:<id>}}` for the real value on the way out, and writes an audit log. | — | — |
 | Proxy Configuration | The app's record of your Proxy. It gives the Proxy ID and registration token the Proxy uses to register itself. One per zone. | Proxy Configuration | `GET /public/v1/proxies` (requested, not live yet) |
 | HashiCorp Vault | Runs on your machine in Docker. Holds the real secret values. | — | — |
 | Secret | A value in HashiCorp Vault at a path, stored as JSON key-value pairs. Passport reads the key `value`. | — | — |
 | Secret Reference | A pointer to a Vault path. Its UUID is what goes in `{{vault:<uuid>}}`. | Secret references | `secret-references` |
 | Namespace | A group of related APIs and their access rules. | Namespace | `namespaces` |
-| Resource Group | One API host and its Endpoints. Makes an Endpoint visible in the app. | Resource group | `resource-groups` |
-| Endpoint | A method, host and path Passport protects, with slots that map a header or query parameter to a Secret Reference. | Endpoint; a slot is "Sent in" | `endpoints`; slot = `secrets[].label` |
+| Resource Group | One API and its Endpoints, named for the API (`Passport demo API`). Access is requested on it; it makes an Endpoint visible in the app. | Resource group | `resource-groups` |
+| Endpoint | The resource: a method, host and path Passport protects, with slots that map a header or query parameter to a Secret Reference. | Endpoint; a slot is "Sent in" | `endpoints`; slot = `secrets[].label` |
 | Access Request | A request for access to Endpoints. A team admin's request for themselves is approved automatically. | Approvals | `access-requests` |
 | Access Grant | Time-limited permission (7, 30 or 90 days) to call Endpoints. | My access | `access-grants` |
 | Client certificate | Issued to you by `passport login`; tells the Proxy who you are and which Endpoints you may call. | — | — |

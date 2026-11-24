@@ -29,12 +29,15 @@ marked as such; it isn't a test.
   restart policy doesn't retry forever.
 - Proxy console on the same image (run without registration): `/console`
   answers 200; `/auth/login` accepts `admin` / `passport-local` from
-  `proxy.env` (200) and refuses a wrong password (401).
+  `proxy.env` (200) and refuses a wrong password (401). With the file audit
+  sink from `proxy.env`, the Proxy writes `audit/audit.jsonl` as the host user
+  and the console's audit page (`/audit/ui`, `/audit/api/list`) answers 200 and
+  lists that file. No request went through, so no audit event was seen yet.
 
 2026-11-24 · every `passport-onboard` branch against stand-ins for `docker`,
-`curl` and `passport` (44 cases, all passing on macOS bash 3.2 and on Debian
+`curl` and `passport` (45 cases, all passing on macOS bash 3.2 and on Debian
 bash 5.2 with GNU tools): `key check` for an admin, a member, a rejected key,
-a missing `/me` and another team's Proxy Configuration; `proxy start` for a
+a missing `/me` and another team's Proxy Configuration; `proxy start` for an empty Proxy ID or token, a
 registration, a reuse without recreating, a 401 token, a 409 key mismatch, a
 failed download and a Healthy status; `demo apply` creating, reusing across
 paginated lists without writes, a pending Access Request and a 500;

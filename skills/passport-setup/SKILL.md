@@ -102,8 +102,9 @@ Coming back later: `status` reports `resume: true`; follow "Coming back" in
   `passport-vault-data`, all labelled `com.postman.passport-onboarding`.
 - `~/.passport/onboarding/`: `state.json`; `proxy.env` (the Proxy's settings,
   including the Vault token); `api-key.env` until the hands-on deletes it;
-  `keys/` (the Proxy's two private keys); `vault/` (HashiCorp Vault's unseal key
-  and root token, and its config).
+  `keys/` (the Proxy's two private keys); `audit/` (the Proxy's audit log, which
+  its console shows); `vault/` (HashiCorp Vault's unseal key and root token,
+  and its config).
 - The Passport CLI and its login in `~/.passport/`.
 
 ## Reference
