@@ -396,6 +396,7 @@ proxy_start() {
   [ -n "$(env_get "$f" PASSPORT_PROXY_TOKEN)" ] || die 2 proxy_token_empty "PASSPORT_PROXY_TOKEN in $f is still empty"
   [ -n "$(env_get "$f" PASSPORT_PROXY_ALLOWED_TEAM_IDS)" ] || die 3 team_unknown "Team ID not known yet. Run: passport-onboard key check"
   vault_ok || die 3 vault_down "The Secret Vault (HashiCorp) isn't running. Run: passport-onboard vault up"
+  env_set "$f" PASSPORT_PROXY_HEARTBEAT_ENABLED true   # older proxy.env files lack it; without it the Proxy never registers
   sha=$(openssl dgst -sha256 "$f" | awk '{print $NF}')
   if exists "$PROXY_C"; then
     ours "$PROXY_C" || die 3 name_taken "A container named $PROXY_C exists and wasn't made by this skill. Rename or remove it yourself, then rerun."
