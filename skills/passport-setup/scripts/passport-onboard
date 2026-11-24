@@ -389,7 +389,7 @@ key_check() {
       if [ "$API_STATUS" = 200 ]; then
         pid=$(env_get "$ONB/proxy.env" PASSPORT_PROXY_ID)
         if jq -e --arg id "$pid" '[.data[]? | select(.id != $id)] | length > 0' "$API_BODY" >/dev/null; then
-          die 2 other_proxy_configuration "Your team already has a Proxy Configuration that isn't the one in proxy.env. If you just created it, paste its Proxy ID into proxy.env first. Otherwise delete it in the app ($PASSPORT_APP_URL), then continue. The skill never deletes it."
+          die 2 other_proxy_configuration "Your team already has a Proxy Configuration that isn't the one in proxy.env. If you just created it, paste its Proxy ID into proxy.env first. Otherwise delete it in the app ($PASSPORT_APP_URL/access-proxies), then continue. The skill never deletes it."
         fi
         emit "{\"teamId\":$(js "$team"),\"admin\":true,\"proxyListChecked\":true}"
       else
@@ -453,9 +453,9 @@ proxy_start() {
   fi
   case $cloud in
     '"healthy"'|unknown) ;;
-    null) die 2 proxy_not_found "Passport Cloud has no Proxy Configuration with the PASSPORT_PROXY_ID in $f. Copy the ID again from the app." "$logs";;
-    '"setup_expired"') die 2 proxy_setup_expired "The registration token expired or was revoked. Create a new one on the Proxy Configuration page and paste it into PASSPORT_PROXY_TOKEN in $f." "$logs";;
-    '"disabled"') die 2 proxy_disabled "This Proxy Configuration is disabled in the app. Enable it, then rerun." "$logs";;
+    null) die 2 proxy_not_found "Passport Cloud has no Proxy Configuration with the PASSPORT_PROXY_ID in $f. Copy the ID again from $PASSPORT_APP_URL/access-proxies." "$logs";;
+    '"setup_expired"') die 2 proxy_setup_expired "The enrollment token expired or was revoked. Create a new one on the Proxy Configuration page ($PASSPORT_APP_URL/access-proxies) and paste it into PASSPORT_PROXY_TOKEN in $f." "$logs";;
+    '"disabled"') die 2 proxy_disabled "This Proxy Configuration is disabled in the app. Enable it at $PASSPORT_APP_URL/access-proxies, then rerun." "$logs";;
     *) die 2 proxy_not_healthy "Passport Cloud reports the Proxy as $cloud after 90 s. Its last log lines are in error.logs." "$logs";;
   esac
   mark_done proxy
@@ -509,7 +509,9 @@ demo_apply() {
     ep=$(create "/public/v1/namespaces/$ns/endpoints" "$(jq -nc --arg h "$PASSPORT_DEMO_API_HOST" --arg r "$ref" --arg g "$rg" '{method:"GET",host:$h,path:"/",secrets:[{label:"x-demo-api-key",secretReferenceId:$r}],resourceGroupIds:[$g]}')") || die 1 api_error "Creating the Endpoint failed. $(api_err)"; }
   sset '.demo.ep = $v' "$ep"; add Endpoint "$ep" $reused
   gr=$(active_grant "$ns" "$rg" "$ep") || die 1 api_error "Listing Access Grants failed. $(api_err)"
+  reused=true
   if [ -z "$gr" ]; then
+    reused=false
     ar=$(create /public/v1/access-requests "$(jq -nc --arg ns "$ns" --arg ep "$ep" '{namespaceId:$ns,entities:[{type:"resource_endpoint",id:$ep}],message:"Passport onboarding demo",durationDays:7}')") || die 1 api_error "Creating the Access Request failed. $(api_err)"
     sset '.demo.ar = $v' "$ar"; add "Access Request" "$ar" false
     st=$(jq -r '.data.status // empty' "$API_BODY" 2>/dev/null)
@@ -522,7 +524,7 @@ demo_apply() {
     for i in 1 2 3 4 5; do gr=$(active_grant "$ns" "$rg" "$ep"); [ -n "$gr" ] && break; sleep 2; done
     [ -n "$gr" ] || die 1 grant_missing "The request is approved but no active Access Grant showed up yet. Rerun in a minute."
   fi
-  sset '.demo.grant = $v' "$gr"; add "Access Grant" "$gr" true
+  sset '.demo.grant = $v' "$gr"; add "Access Grant" "$gr" $reused
   emit "{\"objects\":[$objs]}" agent "Demo objects ready" "passport-onboard demo verify"
 }
 demo_verify() {

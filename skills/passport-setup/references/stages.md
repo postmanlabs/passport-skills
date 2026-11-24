@@ -69,8 +69,18 @@ Run `passport-onboard vault up`. Report the container, the Secret Vault (HashiCo
 
 ## 6. Deploy the Proxy — user and agent
 
-1. Run `passport-onboard proxy prepare`. It makes the Proxy's two keys and two
-   files the user fills in.
+1. Run `passport-onboard proxy prepare`, then say: **"I made two private keys
+   for the Proxy and two files for you, in `~/.passport/onboarding/`:**
+
+   - **`keys/ca.pem` signs the client certificate that tells the Proxy who you
+     are.**
+   - **`keys/ref.pem` decrypts your Secret References. Passport Cloud encrypts
+     them for this Proxy only.**
+   - **`api-key.env` holds a temporary setup key. You paste it next.**
+   - **`proxy.env` holds the Proxy's settings. You add two values to it soon;
+     I filled in the rest.**
+
+   **You never edit the keys."**
 2. The API key, as its own short message. Say: **"Create an API key in the
    Passport app under Account → API keys (`<PASSPORT_APP_URL>/me/api-keys`).
    Paste it into `~/.passport/onboarding/api-key.env` after
@@ -85,8 +95,9 @@ Run `passport-onboard vault up`. Report the container, the Secret Vault (HashiCo
    the exact problem Passport solves. At the end, when you protect your first
    API, you'll move a new key into the Secret Vault (HashiCorp) and revoke this one."**
 4. The Proxy Configuration. Say: **"In the Passport app, open Proxy
-   Configuration and create one; pick any name. Copy its Proxy ID and
-   registration token into `~/.passport/onboarding/proxy.env`, after
+   Configuration (`<PASSPORT_APP_URL>/access-proxies`) and create one; pick
+   any name. Copy its Proxy ID and enrollment token into
+   `~/.passport/onboarding/proxy.env`, after
    `PASSPORT_PROXY_ID=` and `PASSPORT_PROXY_TOKEN=`. Everything else in that
    file is already filled in; read it to see how your Proxy is configured."**
    Open the file for them.
@@ -119,13 +130,23 @@ Run `passport login`, wait for it to finish, then `passport-onboard cli check`.
 
 ## 8. Verify secret resolution with a sample API — agent, plan shown first
 
-1. `passport-onboard demo plan`. Show the five objects as a table before
-   creating anything. The Resource Group is named for the API
-   (`Passport demo API`); the Endpoint is the method, host and path. The Access Request is for 7 days because this check is
-   short-lived; say so in one line.
+1. `passport-onboard demo plan`. Before creating anything, show the five
+   objects as a table: object, name or value, and *What it is*, from these
+   lines:
+
+   | Object | What it is |
+   |---|---|
+   | Namespace | **"Groups the sample API and the rules for who may call it."** |
+   | Resource Group | **"The sample API, `Passport demo API`. It shows its Endpoints in the app."** |
+   | Secret Reference | **"Where the sample key lives in the Secret Vault (HashiCorp): `secret/demo-api-key`. Never the key itself."** |
+   | Endpoint | **"The call Passport protects: `GET <host>/`, with the key sent in `x-demo-api-key`."** |
+   | Access Request | **"Asks for 7 days of access to that Endpoint, enough for this check. As the admin, yours is approved automatically."** |
+   | Access Grant | **"Your permission to call the Endpoint for 7 days. Your pointer comes with it."** |
+
+   The plan has no Access Grant; it appears after the request is approved.
 2. Menu, header "Sample API": **"Create these"** / **"Stop for now"**.
-3. `passport-onboard demo apply`. Show one line per object: type, ID, and
-   whether it was created or already there. If the Access Request isn't
+3. `passport-onboard demo apply`. Show one row per object: type, ID, whether
+   it was created or already there, and its *What it is* line from step 1. If the Access Request isn't
    approved, show the hint and wait; never approve it yourself.
 4. `passport-onboard demo verify`. Show the proof: HTTP status, the key the
    demo API received (`data.keyReceived`, masked) and its length (19), and
