@@ -39,8 +39,18 @@ registry. Started by `proxy start` with the skill's `proxy.env`, a made-up
 Proxy ID and token, and beta's Passport Cloud, it reads its keys and the Secret
 Vault (HashiCorp) settings, calls Passport Cloud, and is refused.
 
+2026-11-25 · Secret Vault (HashiCorp) 2.2.1 UI in a browser: the link from
+`handson plan` (`/ui/vault/secrets-engines/secret/kv/create?initialKey=passport%2Fapi-key`)
+survives the Token sign-in and opens the form with *Path for this secret* set
+to `passport/api-key`; the older `/ui/vault/secrets/…` route redirects without
+the path. Typing the key `value` and a value, then *Save* without *Add*,
+stores the secret, and `vault check passport/api-key` finds it. The Proxy
+escapes the path (`url.PathEscape`), so it asks for
+`secret/data/passport%2Fapi-key`; the Secret Vault (HashiCorp) answers that
+with the secret.
+
 2026-11-24 · every `passport-onboard` branch against stand-ins for `docker`,
-`curl` and `passport` (55 cases, passing on macOS bash 3.2; an earlier 45-case
+`curl` and `passport` (56 cases, passing on macOS bash 3.2; an earlier 45-case
 version also passed on Debian bash 5.2 with GNU tools). The `passport`
 stand-in parses `-H` the way the real CLI does. `key check` for an admin, a
 member, a rejected key, a missing `/me` and another team's Proxy Configuration;
@@ -50,7 +60,8 @@ a crash, a restart loop, Passport Cloud unreachable (log lines handed over with
 secrets hidden) and a failed download; `demo apply` creating, reusing across
 paginated lists without writes, a pending Access Request and a 500;
 `demo verify` passing with the pointer from the certificate, no pointer yet,
-receiving the unswapped pointer, and a Proxy refusal; `handson check` complete
+receiving the unswapped pointer, and a Proxy refusal; `handson plan`'s link to the
+Secret Vault (HashiCorp) form; `handson check` complete
 and incomplete, `verify` with the user's pointer, `finish` with the first key
 still live and revoked; public API calls through the Proxy after the hands-on;
 no network, an API error during the hands-on check, a non-JSON reply, and an

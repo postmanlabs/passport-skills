@@ -172,22 +172,35 @@ register an API, and call it with only a pointer. The API is Passport's own
 public API, so afterwards I can manage Passport for you without ever holding a
 key."** Run `passport-onboard handson plan` for the values below.
 
-1. **Store a new key.** "Remember the setup key in `api-key.env`? Any
-   program running as you, me included, can read it. That's the problem
-   Passport solves, so this time do it the right way: create a second API key
-   in the app and store it in the Secret Vault (HashiCorp), where only the
-   Proxy reads it. Open
-   the Secret Vault (HashiCorp) UI at `<data.vault.ui>` and sign in with method *Token*.
-   Your token is the `VAULT_TOKEN` value in `~/.passport/onboarding/proxy.env`,
-   the same token the Proxy uses. Create a secret in `secret` at path
-   `passport-api-key`. A secret is a set of key-value pairs: put your API key
-   under the key named `value`."
+1. **Store a new key.** Open `<data.vault.createUrl>` for them (`open` on
+   macOS, `xdg-open` on Linux), then say: **"Remember the setup key in
+   `api-key.env`? Any program running as you, me included, can read it.
+   That's the problem Passport solves, so this time do it the right way:
+   create a second API key in the app (`<PASSPORT_APP_URL>/me/api-keys`) and
+   store it in the Secret Vault (HashiCorp), where only the Proxy reads it.
+   I've opened its UI on the page that creates the secret
+   (`<data.vault.createUrl>`):**
+
+   1. **Sign in with method *Token*. The token is the `VAULT_TOKEN` value in
+      `~/.passport/onboarding/proxy.env`, the same one the Proxy uses.**
+   2. **The form opens with *Path for this secret* set to `passport/api-key`.
+      Leave it as it is.**
+   3. **Under *Secret data*, type `value` in the *key* box: the word
+      `value`, exactly. Paste your new API key in the box next to it.**
+   4. **Click *Save*. Don't click *Add*: it only adds another empty row.**
+
+   **If a refresh signs you out before you save, open the same link and sign
+   in again."**
+
+   An empty `data.vault.createUrl` means the Secret Vault (HashiCorp) isn't
+   running: `passport-onboard vault up`, then `handson plan` again.
 2. **Create these in the app, in this order.** Name only the objects and
    values; the app's screens are changing.
    1. Namespace `passport-api`. It holds everything below.
    2. Resource Group `Passport public API`, for the API being protected.
    3. Secret Reference `passport-api-key`: vault type HashiCorp, path
-      `passport-api-key`. It must exist before an Endpoint can send it.
+      `passport/api-key`, the path from step 1 without `secret/`. It must
+      exist before an Endpoint can send it.
    4. Endpoint: method `*`, host `<API host>`, path `/public/v1/*`, in that
       Resource Group, with an `Authorization` slot mapped to the Secret
       Reference `passport-api-key`. (The `Bearer ` prefix isn't set here; the
@@ -196,7 +209,9 @@ key."** Run `passport-onboard handson plan` for the values below.
       because this grant is what keeps my access to the Passport API working.
       As the admin, yours is approved automatically.
 3. When they say done: `passport-onboard handson check`. Show each item as
-   found or missing; repeat until `data.complete`.
+   found or missing; repeat until `data.complete`. If the secret is missing,
+   run `passport-onboard vault check passport/api-key` and tell the user which
+   part to fix: no secret at that path, or no key named `value`.
 4. `passport-onboard handson verify`: a call to the public API through the
    Proxy using only the Secret Reference. Show the namespaces it returned.
 

@@ -21,7 +21,8 @@ API_STATUS=000 PROXY_ERR='' PROXY_REQ='' CLI_REAUTH=''
 SAMPLE_KEY=sdfdsfdsfsdfdfsdfds
 DEMO_NS=passport-proxy-local-e2e
 HANDSON_NS=passport-api
-HANDSON_SECRET=passport-api-key
+HANDSON_SECRET=passport-api-key   # the Secret Reference
+HANDSON_PATH=passport/api-key      # its secret, under secret/
 DEMO_RG="Passport demo API" HANDSON_RG="Passport public API"   # a Resource Group is named for its API
 API_HOST=${PASSPORT_API_URL#https://}; API_HOST=${API_HOST%%/*}
 STAGES="welcome setup-type machine-check account vault proxy cli demo tour handson"
@@ -548,10 +549,13 @@ cmd_handson() {
   STAGE=handson
   need curl jq; state_init
   case ${1:-} in
-    plan) emit "{\"vault\":{\"mount\":\"secret\",\"path\":\"$HANDSON_SECRET\",\"key\":\"value\",\"ui\":$(js "$(vault_ui)")},\"objects\":[
+    plan) local ui create=''; ui=$(vault_ui)
+      # The Secret Vault (HashiCorp) UI's create form, path filled in; it survives the sign-in redirect.
+      [ -n "$ui" ] && create="$ui/vault/secrets-engines/secret/kv/create?initialKey=$(jq -rn --arg p "$HANDSON_PATH" '$p|@uri')"
+      emit "{\"vault\":{\"mount\":\"secret\",\"path\":\"$HANDSON_PATH\",\"key\":\"value\",\"ui\":$(js "$ui"),\"createUrl\":$(js "$create")},\"objects\":[
       {\"type\":\"Namespace\",\"name\":\"$HANDSON_NS\"},
       {\"type\":\"Resource Group\",\"name\":\"$HANDSON_RG\",\"host\":\"$API_HOST\"},
-      {\"type\":\"Secret Reference\",\"name\":\"$HANDSON_SECRET\",\"vaultType\":\"hashicorp\",\"vaultPath\":\"$HANDSON_SECRET\"},
+      {\"type\":\"Secret Reference\",\"name\":\"$HANDSON_SECRET\",\"vaultType\":\"hashicorp\",\"vaultPath\":\"$HANDSON_PATH\"},
       {\"type\":\"Endpoint\",\"method\":\"*\",\"host\":\"$API_HOST\",\"path\":\"/public/v1/*\",\"slot\":\"Authorization\",\"slotSecretReference\":\"$HANDSON_SECRET\",\"requestHeader\":\"Authorization: Bearer {{vault:<your pointer>}}\"},
       {\"type\":\"Access Request\",\"on\":\"the Resource Group\",\"durationDays\":90}]}";;
     check) handson_check;;
@@ -563,8 +567,8 @@ cmd_handson() {
 handson_check() {
   local ns='' ep='' rg='' ref='' gr='' secret=false missing=0 items=''
   item() { items="$items${items:+,}{\"object\":$(js "$1"),\"found\":$2${3:+,\"id\":$(js "$3")}}"; [ "$2" = true ] || missing=$((missing + 1)); }
-  vault_ok && vexec kv get -format=json "secret/$HANDSON_SECRET" 2>/dev/null | jq -e '(.data.data.value // "") | length > 0' >/dev/null && secret=true
-  item "Secret Vault (HashiCorp) secret secret/$HANDSON_SECRET with key value" $secret
+  vault_ok && vexec kv get -format=json "secret/$HANDSON_PATH" 2>/dev/null | jq -e '(.data.data.value // "") | length > 0' >/dev/null && secret=true
+  item "Secret Vault (HashiCorp) secret secret/$HANDSON_PATH with key value" $secret
   ns=$(find_id /public/v1/namespaces '.name == $v' "$HANDSON_NS") || die 1 api_error "Listing Namespaces failed ($(api_status)). $(api_err)"
   item "Namespace $HANDSON_NS" "$([ -n "$ns" ] && echo true || echo false)" "$ns"
   if [ -n "$ns" ]; then
