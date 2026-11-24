@@ -53,8 +53,9 @@ don't retry silently. What has been tested is in `verification.md`.
 
 ## Proxy image
 
-The Proxy image in `references/urls.env` must be public. A `403` or `denied`
-on download means it isn't published yet; never ask for registry credentials.
+The Proxy image in `references/urls.env` must be public. A `404`, `403` or
+`denied` on download means that tag isn't published yet; never ask for
+registry credentials.
 Tell the user the Proxy stage waits for the image (dependencies list).
 
 ## Proxy keys lost

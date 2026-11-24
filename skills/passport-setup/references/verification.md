@@ -19,8 +19,8 @@ marked as such; it isn't a test.
   without printing any value.
 - `proxy prepare`: creates `ca.pem`, `ref.pem`, `api-key.env`, `proxy.env`
   (all owner-only) and fills every skill-owned line of `proxy.env`.
-- `proxy start`: stops with `image_pull` because the beta Proxy image returns
-  403.
+- `proxy start`: stops with `image_pull` because the Proxy image tag
+  `onboarding-beta` isn't published yet (404).
 - `proxy start` with a Proxy image built locally from the beta source and a
   fake registration token: the Proxy starts as the host user, reads its keys
   from the read-only mount and its settings from `proxy.env`, reaches Passport
