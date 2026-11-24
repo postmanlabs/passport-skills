@@ -10,7 +10,7 @@ One `passport` plugin, two skills:
 
 | Skill | Use it to | Starts when |
 |---|---|---|
-| [`passport-setup`](skills/passport-setup/SKILL.md) | Set up a Passport Proxy and a Secret Vault (HashiCorp) in Docker on your machine, run a verified demo call, then build one API yourself | you say **`setup passport`** |
+| [`passport-setup`](skills/passport-setup/SKILL.md) | Set up a Passport Proxy and a Secret Vault (HashiCorp) in Docker on your machine, verify secret resolution with a sample API, then protect your first API | you say **`setup passport`** |
 | [`passport-public-api`](skills/passport-public-api/SKILL.md) | Register APIs and manage credentials (Secret References, bindings, access requests) through the Passport public API | a task needs an API credential instead of a `.env` file |
 
 `passport-public-api` assumes Passport is already set up; if it isn't, it points back to `passport-setup`.

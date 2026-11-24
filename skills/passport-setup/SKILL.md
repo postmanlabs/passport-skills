@@ -2,8 +2,8 @@
 name: passport-setup
 description: >
   Set up Postman Passport for one developer on their own machine (macOS or Linux): a Passport Proxy
-  and a Secret Vault (HashiCorp) in Docker, the Passport CLI signed in, a verified demo call, and a hands-on
-  round where the user stores a key in the Secret Vault (HashiCorp) and calls an API with only a pointer. Use when the user
+  and a Secret Vault (HashiCorp) in Docker, the Passport CLI signed in, secret resolution verified with a sample API, and the user
+  protecting their first API: a key stored in the Secret Vault (HashiCorp), the API called with only a pointer. Use when the user
   says "set up passport", "setup passport", "run Passport locally", "install the Passport proxy",
   or wants to stop putting API keys in .env files and doesn't have Passport running yet. Also use
   to resume or check an earlier Passport setup on this machine. Once Passport is set up, the
@@ -45,6 +45,8 @@ is in `references/stages.md`; follow it in order.
 9. **Use the glossary's capitalised terms** (Proxy, Secret Vault, Secret
    Reference, Namespace, Endpoint, Access Grant, Proxy Configuration) and say
    "Passport Cloud", never "Postman Cloud".
+10. **Stay in this session.** Never give the user a command that starts a new
+    agent session (such as `claude`); it loses everything done so far.
 
 ## The script
 
@@ -65,7 +67,7 @@ paste raw JSON at the user. State lives in `~/.passport/onboarding/state.json`.
 |---|---|
 | `status` / `status --line` | OS check, what's done (checked against Docker and the CLI), the progress line |
 | `mark <stage>` | Records a stage the user finished: `welcome`, `setup-type`, `account`, `tour` |
-| `doctor` | Machine check, with an install command for anything missing |
+| `doctor` | Prerequisites check, with an install command for anything missing |
 | `vault up` · `vault check <path>` | Starts the Secret Vault (HashiCorp); checks a secret exists with the key `value` |
 | `proxy prepare` · `key check` · `proxy start` | The Proxy's keys and files; the API key and team; start and registration |
 | `cli check` | Is the Passport CLI signed in |
@@ -83,15 +85,16 @@ who'd rather do it by hand.
 | Stage | Who | Script |
 |---|---|---|
 | Welcome | agent | `status`, then `references/welcome.md` as written |
-| Setup type | user | `mark setup-type` |
-| Machine check | agent; the user approves installs | `doctor` |
-| Account | user, in the browser | `mark account` |
-| Local Vault | agent | `vault up` |
-| Proxy | user fills two files, agent starts it | `proxy prepare`, `key check`, `proxy start` |
-| CLI sign-in | agent runs `passport login`, user approves | `cli check` |
-| Demo | agent, after the user OKs the plan | `demo plan`, `demo apply`, `demo verify` |
-| Tour | user, in the app | `mark tour` |
-| Hands-on | user builds, agent checks | `handson plan`, `check`, `verify`, `finish` |
+| Choose your setup | user | `mark setup-type` |
+| Check prerequisites | agent; the user approves installs | `doctor` |
+| Sign in to the app | user, in the browser | `mark account` |
+| Start the Secret Vault | agent | `vault up` |
+| Deploy the Proxy | user fills two files, agent starts it | `proxy prepare`, `key check`, `proxy start` |
+| Authenticate the CLI | agent runs `passport login`, user approves | `cli check` |
+| Verify secret resolution with a sample API | agent, after the user OKs the plan | `demo plan`, `demo apply`, `demo verify` |
+| Walk through what was created | user, in the app | `mark tour` |
+| Protect your first API | user builds, agent checks | `handson plan`, `check`, `verify` |
+| Revoke the setup key | user revokes, agent checks | `handson finish` |
 
 Coming back later: `status` reports `resume: true`; follow "Coming back" in
 `references/stages.md`.
@@ -101,7 +104,7 @@ Coming back later: `status` reports `resume: true`; follow "Coming back" in
 - Docker: `passport-vault`, `passport-proxy`, network `passport-net`, volume
   `passport-vault-data`, all labelled `com.postman.passport-onboarding`.
 - `~/.passport/onboarding/`: `state.json`; `proxy.env` (the Proxy's settings,
-  including the Secret Vault token); `api-key.env` until the hands-on deletes it;
+  including the Secret Vault token); `api-key.env` until the revoke step deletes it;
   `keys/` (the Proxy's two private keys); `audit/` (the Proxy's audit log, which
   its console shows); `vault/` (the Secret Vault (HashiCorp) unseal key and root token,
   and its config).

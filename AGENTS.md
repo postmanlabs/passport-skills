@@ -3,7 +3,7 @@
 This repository is the **Postman Passport** skills, shipped as one `passport` plugin with two skills,
 each self-contained in its own folder under `skills/`:
 - `skills/passport-setup/` — set up Passport on this machine (a Proxy and a Secret Vault (HashiCorp) in Docker,
-  macOS and Linux), verify it with a demo call, then a hands-on round.
+  macOS and Linux), verify secret resolution with a sample API, then the user protects their first API.
 - `skills/passport-public-api/` — once Passport is set up, register APIs and manage credentials (Secret
   References, bindings, access requests) through the Passport public API.
 

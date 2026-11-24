@@ -22,7 +22,7 @@ jobs:
           S="$SKILL/scripts/passport-onboard"
           "$S" status | jq -e '.ok and .data.next == "welcome"'
           "$S" mark welcome | jq -e '.data.marked == "welcome"'
-          [ "$("$S" status --line)" = "[#---------] 1/10 done · next: Setup type" ]
+          [ "$("$S" status --line)" = "[#---------] 1/10 done · next: Choose your setup" ]
           "$S" demo plan | jq -e '.data.objects | length == 5'
           "$S" handson plan | jq -e '.data.objects[3].path == "/public/v1/*"'
           set +e

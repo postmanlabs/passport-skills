@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "passport",
   "displayName": "Postman Passport",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Step-by-step, agent-runnable skills for Postman Passport: set up a Passport Proxy and a Secret Vault (HashiCorp) in Docker on your machine (macOS and Linux), prove it with a demo call, then register APIs and manage credentials through the Passport public API.",
   "author": { "name": "Postman", "url": "https://github.com/postmanlabs" },
   "homepage": "https://github.com/postmanlabs/passport-skills",

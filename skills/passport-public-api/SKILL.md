@@ -42,7 +42,7 @@ passport-setup skill; don't set Passport up from here. `WORKOS_REAUTH_REQUIRED`
 ## Authenticate: through the Proxy, never with a key in hand
 
 You call this API exactly the way any Passport user calls an API: with a
-Secret Reference, through the Proxy. The passport-setup skill's hands-on step
+Secret Reference, through the Proxy. The passport-setup skill's "Protect your first API" step
 creates it (Namespace `passport-api`, Secret Reference `passport-api-key`):
 
 ```bash

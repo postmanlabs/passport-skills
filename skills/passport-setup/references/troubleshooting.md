@@ -64,15 +64,15 @@ Tell the user the Proxy stage waits for the image (dependencies list).
 for this Proxy. If it was deleted or changed, Passport Cloud refuses the Proxy
 (`409`) and old References can't be decrypted. Explain this and stop: there's
 no automatic fix. The user can delete the Proxy Configuration in the app and
-start the Proxy stage again; the demo and hands-on References then need
-creating again.
+start the Proxy stage again; the sample API's and the first API's References
+then need creating again.
 
 ## Secret Vault (HashiCorp) data lost
 
 If the `passport-vault-data` volume or `~/.passport/onboarding/vault/` is
 gone, run `vault up`: it creates a fresh Secret Vault (HashiCorp), stores the demo secret again
 and writes the new `VAULT_TOKEN` into `proxy.env`. Then `proxy start` (it
-recreates the Proxy so it reads the new token). The user stores the hands-on
+recreates the Proxy so it reads the new token). The user stores the first API's
 secret again in the Secret Vault (HashiCorp) UI. References keep working: they point at paths.
 
 ## Coming back to a broken setup
@@ -84,7 +84,7 @@ secret again in the Secret Vault (HashiCorp) UI. References keep working: they p
 | Secret Vault (HashiCorp) locked | It unlocks itself at start; if not, `vault up` unlocks it. |
 | Registration token rejected | `registration_token_rejected` above. |
 | CLI signed out | `passport login`. |
-| The API key's team differs from the one recorded | Ask which team to continue with; a different team starts again from the Account stage. |
+| The API key's team differs from the one recorded | Ask which team to continue with; a different team starts again from the sign-in step. |
 | `~/.passport/onboarding/` deleted | **Proxy keys lost**: explain and stop. |
 
 ## Certificate errors on this machine

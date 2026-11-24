@@ -1,6 +1,7 @@
 # Stages
 
-Ten stages in order. Every stage message starts with the progress line from
+Eleven steps in order; the script tracks the last two as one stage,
+`handson`. Every stage message starts with the progress line from
 `passport-onboard status --line`. Values in `<angle brackets>` come from
 `references/urls.env` or from the script's JSON output. The script is always
 `"$SKILL_DIR/scripts/passport-onboard"`; the user never runs it.
@@ -15,7 +16,7 @@ guidance for you.
 2. Show `references/welcome.md` as written.
 3. `passport-onboard mark welcome`.
 
-## 2. Setup type — user
+## 2. Choose your setup — user
 
 Menu, header "Setup type":
 
@@ -26,11 +27,11 @@ Menu, header "Setup type":
 A team: say it's coming soon and offer the same menu again with "Stop for now".
 Just me: `passport-onboard mark setup-type`, then say: **"By the end you'll
 have a Proxy and a Secret Vault (HashiCorp) running in Docker on this machine, the
-Passport CLI signed in, a working demo call, and you'll have done one full
-cycle yourself: stored a secret, registered an API, and called it with only a
+Passport CLI signed in, secret resolution verified with a sample API, and
+you'll have done one full cycle yourself: stored a secret, registered an API, and called it with only a
 pointer."**
 
-## 3. Machine check — agent, the user approves installs
+## 3. Check prerequisites — agent, the user approves installs
 
 1. `passport-onboard doctor`. Show `data.checks` as a table: tool, why it's
    needed here, status. Never hide a row. Rows other than tools (a busy port,
@@ -45,7 +46,7 @@ pointer."**
    `npm uninstall -g @postman/postman-passport`.
 5. Run `doctor` again until `data.ready` is true.
 
-## 4. Account — user
+## 4. Sign in to the app — user
 
 Menu, header "Account": **"Create a new account (recommended)"** /
 **"Use an existing account"**.
@@ -58,7 +59,7 @@ Menu, header "Account": **"Create a new account (recommended)"** /
 
 Wait until they say they're signed in, then `passport-onboard mark account`.
 
-## 5. Local Vault — agent
+## 5. Start the Secret Vault — agent
 
 Say first: **"I'm starting the Secret Vault (HashiCorp) in Docker on this machine. It holds
 the real secret values; Passport Cloud never sees them."**
@@ -66,7 +67,7 @@ the real secret values; Passport Cloud never sees them."**
 Run `passport-onboard vault up`. Report the container, the Secret Vault (HashiCorp) UI address
 (`data.ui`) and that the demo secret is stored at `secret/demo-api-key`.
 
-## 6. Proxy — user and agent
+## 6. Deploy the Proxy — user and agent
 
 1. Run `passport-onboard proxy prepare`. It makes the Proxy's two keys and two
    files the user fills in.
@@ -81,8 +82,8 @@ Run `passport-onboard vault up`. Report the container, the Secret Vault (HashiCo
    `GET /public/v1/me` ships (see `troubleshooting.md`). When it passes, say:
    **"Your key works. One thing to know: keeping an API key in a file like this
    isn't safe — any program running as you, including me, can read it. That's
-   the exact problem Passport solves. In the Hands-on step at the end you'll
-   move a new key into the Secret Vault (HashiCorp) and revoke this one."**
+   the exact problem Passport solves. At the end, when you protect your first
+   API, you'll move a new key into the Secret Vault (HashiCorp) and revoke this one."**
 4. The Proxy Configuration. Say: **"In the Passport app, open Proxy
    Configuration and create one; pick any name. Copy its Proxy ID and
    registration token into `~/.passport/onboarding/proxy.env`, after
@@ -103,7 +104,7 @@ Run `passport-onboard vault up`. Report the container, the Secret Vault (HashiCo
 
    **`proxy.env` says how to change the password."**
 
-## 7. CLI sign-in — agent, the user approves in the browser
+## 7. Authenticate the CLI — agent, the user approves in the browser
 
 Say first: **"Next I'll run `passport login`. It opens your browser to sign
 in, finds your Proxy, and gets the client certificate your requests use. It
@@ -112,13 +113,13 @@ this machine can route through the Proxy."**
 
 Run `passport login`, wait for it to finish, then `passport-onboard cli check`.
 
-## 8. Demo — agent, plan shown first
+## 8. Verify secret resolution with a sample API — agent, plan shown first
 
 1. `passport-onboard demo plan`. Show the five objects as a table before
    creating anything. The Resource Group is named for the API
-   (`Passport demo API`); the Endpoint is the method, host and path. The Access Request is for 7 days because the demo is
+   (`Passport demo API`); the Endpoint is the method, host and path. The Access Request is for 7 days because this check is
    short-lived; say so in one line.
-2. Menu, header "Demo": **"Create these"** / **"Stop for now"**.
+2. Menu, header "Sample API": **"Create these"** / **"Stop for now"**.
 3. `passport-onboard demo apply`. Show one line per object: type, ID, and
    whether it was created or already there. If the Access Request isn't
    approved, show the hint and wait; never approve it yourself.
@@ -126,26 +127,30 @@ Run `passport login`, wait for it to finish, then `passport-onboard cli check`.
    demo API received (`data.keyReceived`, masked) and its length (19), and
    `data.proxyRequestId`. Then say: **"Your request carried only
    `{{vault:<id>}}`. The Proxy checked your Access Grant, fetched the real key
-   from the Secret Vault (HashiCorp) and sent it on. The demo API answered 200 because it
+   from the Secret Vault (HashiCorp) and sent it on. The sample API answered 200 because it
    received the real key."**
 
-## 9. Tour — user
+## 9. Walk through what was created — user
 
 Say: **"Open `<PASSPORT_APP_URL>/setup` and click *Show me what was created*.
-The app walks you through what the demo made. Skip the *Run the demo call
+The app walks you through what the last step created. Skip the *Run the demo call
 yourself* box for now; its command is outdated."**
 
-Menu, header "Tour": **"Continue"** / **"Stop for now"**. On Continue,
+Menu, header "Walkthrough": **"Continue"** / **"Stop for now"**. On Continue,
 `passport-onboard mark tour`.
 
-## 10. Hands-on — the user builds it, the agent checks
+## 10. Protect your first API — the user builds it, the agent checks
 
 Say: **"Now you do one full cycle yourself: store a key in the Secret Vault (HashiCorp),
 register an API, and call it with only a pointer. The API is Passport's own
 public API, so afterwards I can manage Passport for you without ever holding a
 key."** Run `passport-onboard handson plan` for the values below.
 
-1. **Store a new key.** "Create a second API key in the app. Then open
+1. **Store a new key.** "Remember the setup key in `api-key.env`? Any
+   program running as you, me included, can read it. That's the problem
+   Passport solves, so this time do it the right way: create a second API key
+   in the app and store it in the Secret Vault (HashiCorp), where only the
+   Proxy reads it. Open
    the Secret Vault (HashiCorp) UI at `<data.vault.ui>` and sign in with method *Token*.
    Your token is the `VAULT_TOKEN` value in `~/.passport/onboarding/proxy.env`,
    the same token the Proxy uses. Create a secret in `secret` at path
@@ -168,11 +173,14 @@ key."** Run `passport-onboard handson plan` for the values below.
    found or missing; repeat until `data.complete`.
 4. `passport-onboard handson verify`: a call to the public API through the
    Proxy using only the Secret Reference. Show the namespaces it returned.
-5. Say: **"Now revoke your first API key in the app. It's been sitting in a
+
+## 11. Revoke the setup key — user, the agent checks
+
+1. Say: **"Now revoke your first API key in the app. It's been sitting in a
    file, which is exactly what Passport is meant to replace."** When they say
    done: `passport-onboard handson finish`. If the key still works, revocation
    can take about 45 seconds; wait and run it again. It deletes `api-key.env`.
-6. Say: **"On `<PASSPORT_APP_URL>/setup`, tick *My request went through* to
+2. Say: **"On `<PASSPORT_APP_URL>/setup`, tick *My request went through* to
    finish *Add your own API*."** Then: **"You're set up. To register more APIs,
    ask me to use the passport-public-api skill."**
 
@@ -183,7 +191,7 @@ When `status` shows `data.resume: true`:
 1. Run `passport-onboard doctor` first; things change between sessions.
 2. Show the progress line, then menu, header "Resume":
    **"Continue from <next stage>"** / **"Stop for now"**.
-3. Everything done: show the check results and menu **"Re-run the demo call"**
+3. Everything done: show the check results and menu **"Re-run the sample API call"**
    (`demo verify`) / **"Done"**. Never just say "already set up".
 4. Don't repeat the welcome or explain finished stages again; one line is
    enough. Something broken: `troubleshooting.md`, "Coming back to a broken

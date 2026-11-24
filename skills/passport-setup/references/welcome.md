@@ -2,7 +2,7 @@
 
 Show the text below to the user as written, in one message, before running
 anything except `passport-onboard status`. Then ask the setup-type question
-(`stages.md`, Setup type).
+(`stages.md`, Choose your setup).
 
 ---
 
@@ -58,17 +58,21 @@ Four more words you'll see along the way:
 
 The steps:
 
-- **Setup type**: who this Passport is for.
-- **Machine check**: the tools it needs.
-- **Account**: sign up in the Passport app.
-- **Local Vault**: I start the Secret Vault (HashiCorp).
-- **Proxy**: you create an API key and a Proxy Configuration in the app; I
-  start the Proxy.
-- **CLI sign-in**: I run `passport login`; you approve it in the browser.
-- **Demo**: I create a demo API in Passport and call it with only a pointer.
-- **Tour**: the app shows you what the demo made.
-- **Hands-on**: you store a key in the Secret Vault (HashiCorp), register
-  Passport's own API, and call it with only a pointer.
+- **Choose your setup**: who this Passport is for.
+- **Check prerequisites**: the tools it needs.
+- **Sign in to the app**: sign up, or sign in to the Passport app.
+- **Start the Secret Vault**: I start the Secret Vault (HashiCorp) in Docker.
+- **Deploy the Proxy**: you create a temporary setup key (an API key you keep
+  in a file for now) and a Proxy Configuration in the app; I start the Proxy.
+- **Authenticate the CLI**: I run `passport login`; you approve it in the
+  browser.
+- **Verify secret resolution with a sample API**: I register a sample API in
+  Passport and call it with only a pointer; the Proxy puts in the real key.
+- **Walk through what was created**: the app shows you what that step made.
+- **Protect your first API**: you create a second API key and store it the
+  right way, in the Secret Vault (HashiCorp); then you register Passport's own
+  API and call it with only a pointer.
+- **Revoke the setup key**: you revoke the temporary key from the file.
 
 You can stop after any step and pick up later by saying "set up passport"
 again.

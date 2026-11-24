@@ -42,9 +42,10 @@ die() { # exit-code code hint
 need() { local t; for t in "$@"; do command -v "$t" >/dev/null 2>&1 || die 3 missing_tool "$t is not installed. Run: passport-onboard doctor"; done; }
 stage_name() {
   case $1 in
-    welcome) echo Welcome;; setup-type) echo "Setup type";; machine-check) echo "Machine check";;
-    account) echo Account;; vault) echo "Local Vault";; proxy) echo Proxy;; cli) echo "CLI sign-in";;
-    demo) echo Demo;; tour) echo Tour;; handson) echo Hands-on;; *) return 1;;
+    welcome) echo Welcome;; setup-type) echo "Choose your setup";; machine-check) echo "Check prerequisites";;
+    account) echo "Sign in to the app";; vault) echo "Start the Secret Vault";; proxy) echo "Deploy the Proxy";;
+    cli) echo "Authenticate the CLI";; demo) echo "Verify secret resolution with a sample API";;
+    tour) echo "Walk through what was created";; handson) echo "Protect your first API";; *) return 1;;
   esac
 }
 
@@ -164,7 +165,10 @@ cmd_status() {
   done
   local i=0 line_text
   while [ $i -lt "$total" ]; do i=$((i + 1)); if [ $i -le "$n" ]; then bar="$bar#"; else bar="$bar-"; fi; done
-  [ -n "$next" ] && line_text="[$bar] $n/$total done · next: $(stage_name "$next")" || line_text="[$bar] $total/$total done · Passport is set up"
+  local label=''; [ -n "$next" ] && label=$(stage_name "$next")
+  # handson is two steps for the user: after verify only the revoke is left
+  [ "$next" = handson ] && [ "$(sget .handson.verified)" = true ] && label="Revoke the setup key"
+  [ -n "$next" ] && line_text="[$bar] $n/$total done · next: $label" || line_text="[$bar] $total/$total done · Passport is set up"
   if $line; then printf '%s\n' "$line_text"; return 0; fi
   emit "{\"os\":$(js "$os"),\"done\":[${done_list}],\"next\":$(js "$next"),\"resume\":$([ "$n" -gt 0 ] && echo true || echo false),\"line\":$(js "$line_text")}"
 }
