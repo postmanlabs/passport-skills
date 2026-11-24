@@ -33,6 +33,12 @@ marked as such; it isn't a test.
   and the console's audit page (`/audit/ui`, `/audit/api/list`) answers 200 and
   lists that file. No request went through, so no audit event was seen yet.
 
+2026-11-24 · Proxy image `v0.13.0` (`linux/amd64` and `linux/arm64`, built
+from the Proxy's `main` at `0eb470c4`): downloads without signing in to the
+registry. Started by `proxy start` with the skill's `proxy.env`, a made-up
+Proxy ID and token, and beta's Passport Cloud, it reads its keys and the Secret
+Vault (HashiCorp) settings, calls Passport Cloud, and is refused.
+
 2026-11-24 · every `passport-onboard` branch against stand-ins for `docker`,
 `curl` and `passport` (55 cases, passing on macOS bash 3.2; an earlier 45-case
 version also passed on Debian bash 5.2 with GNU tools). The `passport`
@@ -68,17 +74,15 @@ through the Proxy unchanged.
 
 ## Not run yet
 
-Blocked by missing pieces (dependencies list): `key check` against a real
-`GET /public/v1/me`, a real Proxy registration (needs a public Proxy image and
-a real token), and everything after it against beta: `passport login` finding
-the Proxy, `demo apply/verify`, `handson check/verify/finish`, resume after a
-reboot. The Secret Vault (HashiCorp) and the Proxy on Linux Docker. Nothing has
-been run against production yet.
+With Proxy v0.13.0: a real registration and everything after it, against
+beta: `passport login` finding the Proxy, `demo apply/verify`,
+`handson check/verify/finish`, resume after a reboot. The Secret Vault
+(HashiCorp) and the Proxy on Linux Docker. Nothing has been run against
+production yet.
 
 ## Read in source, not run (production, 2026-11-24)
 
-- Proxy v0.13.0 is the first release that registers with a Proxy ID and
-  registration token. With `PASSPORT_CONTROL_PLANE_URL` unset it uses
+- With `PASSPORT_CONTROL_PLANE_URL` unset, Proxy v0.13.0 uses
   `https://api.usepassport.ai`, so `proxy.env` leaves it out.
 - The Passport CLI from the production installer (0.9.5) signs in to
   `app.usepassport.ai` and keeps its files in `~/.passport`; the beta build
@@ -87,7 +91,8 @@ been run against production yet.
 
 ## Read in source, not run (beta, 2026-11-24)
 
-- The Proxy calls Passport Cloud only with
+- Proxy v0.13.0, the first release that registers with a Proxy ID and token,
+  calls Passport Cloud only with
   `PASSPORT_PROXY_HEARTBEAT_ENABLED=true`, then requires `PASSPORT_PROXY_ID`,
   enrols its reference key once with `PASSPORT_PROXY_TOKEN`, and sends
   heartbeats. It still requires `PASSPORT_PROXY_ALLOWED_TEAM_IDS`, reads KV v2
