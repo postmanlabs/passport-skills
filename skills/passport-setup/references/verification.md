@@ -21,13 +21,33 @@ marked as such; it isn't a test.
   (all owner-only) and fills every skill-owned line of `proxy.env`.
 - `proxy start`: stops with `image_pull` because the beta Proxy image returns
   403.
+- `proxy start` with a Proxy image built locally from the beta source and a
+  fake registration token: the Proxy starts as the host user, reads its keys
+  from the read-only mount and its settings from `proxy.env`, reaches Passport
+  Cloud, and is refused with 401. The script reports
+  `registration_token_rejected` in about 7 s and stops the container so its
+  restart policy doesn't retry forever.
+
+2026-11-24 · every `passport-onboard` branch against stand-ins for `docker`,
+`curl` and `passport` (38 cases, all passing on macOS bash 3.2 and on Debian
+bash 5.2 with GNU tools): `key check` for an admin, a member, a rejected key,
+a missing `/me` and another team's Proxy Configuration; `proxy start` for a
+registration, a reuse without recreating, a 401 token, a 409 key mismatch, a
+failed download and a Healthy status; `demo apply` creating, reusing across
+paginated lists without writes, a pending Access Request and a 500;
+`demo verify` passing, receiving the unswapped pointer, and a Proxy refusal;
+`handson check` complete and incomplete, `verify` through the Secret
+Reference, `finish` with the first key still live and revoked; public API
+calls through the Proxy after the hands-on; `status` resuming, and noticing a
+stopped Vault and a signed-out CLI.
 
 ## Not run yet
 
-Blocked by missing pieces (dependencies list): `key check` (needs
-`GET /public/v1/me`), Proxy registration (needs a public Proxy image), and
-everything after it: `passport login` finding the Proxy, `demo apply/verify`,
-`handson check/verify/finish`, resume after a reboot, Linux.
+Blocked by missing pieces (dependencies list): `key check` against a real
+`GET /public/v1/me`, a real Proxy registration (needs a public Proxy image and
+a real token), and everything after it against beta: `passport login` finding
+the Proxy, `demo apply/verify`, `handson check/verify/finish`, resume after a
+reboot. HashiCorp Vault and the Proxy on Linux Docker.
 
 ## Read in source, not run (beta, 2026-11-24)
 

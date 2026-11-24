@@ -17,6 +17,7 @@ VAULT_C=$P-vault PROXY_C=$P-proxy NET=$P-net VOL=$P-vault-data
 LABEL=com.postman.passport-onboarding
 STATE=$ONB/state.json
 API_BODY=$ONB/.api-body
+API_STATUS=000 PROXY_ERR='' PROXY_REQ=''
 SAMPLE_KEY=sdfdsfdsfsdfdfsdfds
 DEMO_NS=passport-proxy-local-e2e
 HANDSON_NS=passport-api
@@ -93,11 +94,12 @@ api() { # METHOD PATH [JSON-BODY]
     args=(-sS -m 30 --config - -X "$1" -H 'Accept: application/json' -o "$API_BODY" -w '%{http_code}')
     [ -n "${3-}" ] && args+=(-H 'Content-Type: application/json' --data-binary "$3")
     API_STATUS=$(printf 'header = "Authorization: Bearer %s"\n' "$key" | curl "${args[@]}" "$PASSPORT_API_URL$2") || API_STATUS=000
-    return 0
+  else
+    ref=$(sget .handson.ref)
+    [ -n "$ref" ] || { API_STATUS=000; printf 000 > "$API_BODY.status"; return 1; }
+    via_proxy "$1" "$PASSPORT_API_URL$2" "${3-}" "Authorization: Bearer {{vault:$ref}}"
   fi
-  ref=$(sget .handson.ref)
-  [ -n "$ref" ] || { API_STATUS=000; return 1; }
-  via_proxy "$1" "$PASSPORT_API_URL$2" "${3-}" "Authorization: Bearer {{vault:$ref}}"
+  printf '%s' "$API_STATUS" > "$API_BODY.status"
 }
 # passport request with headers shown; sets API_STATUS, body to $API_BODY,
 # and PROXY_ERR / PROXY_REQ from the response headers.
@@ -114,6 +116,8 @@ via_proxy() { # METHOD URL BODY HEADER
   printf '%s\n' "$raw" | awk 'body { print } /^\r?$/ { body = 1 }' > "$API_BODY"
   [ -s "$API_BODY" ] || printf '%s\n' "$raw" | tail -1 > "$API_BODY"
 }
+# The last call's status, also when api() ran inside $(…).
+api_status() { cat "$API_BODY.status" 2>/dev/null || echo 000; }
 api_err() { jq -r '[.code // .error.code // empty, .detail // .title // .error.message // .message // empty] | map(tostring) | join(": ")' "$API_BODY" 2>/dev/null; }
 # First id in a list whose item matches FILTER ($v = VALUE); follows nextCursor.
 find_id() { # PATH FILTER [VALUE]
@@ -392,7 +396,7 @@ proxy_start() {
     fi
   fi
   if ! exists "$PROXY_C"; then
-    docker pull -q "$PASSPORT_PROXY_IMAGE" >/dev/null 2>&1 || die 1 image_pull "Couldn't download the Proxy image $PASSPORT_PROXY_IMAGE. See troubleshooting.md, 'Proxy image'."
+    docker image inspect "$PASSPORT_PROXY_IMAGE" >/dev/null 2>&1 || docker pull -q "$PASSPORT_PROXY_IMAGE" >/dev/null 2>&1 || die 1 image_pull "Couldn't download the Proxy image $PASSPORT_PROXY_IMAGE. See troubleshooting.md, 'Proxy image'."
     ports=(-p 127.0.0.1:8443:8443 -p 127.0.0.1:8081:8081)
     [ "$(env_get "$f" PASSPORT_PROXY_PUBLIC_URL)" = https://passport-proxy.localhost ] && ports+=(-p 127.0.0.1:443:8443 -p 127.0.0.1:80:8081)
     docker run -d --name "$PROXY_C" --label "$LABEL=1" --label "$LABEL.env=$sha" --network "$NET" \
@@ -403,10 +407,12 @@ proxy_start() {
   for i in $(seq 1 60); do
     proxy_ok && break
     running "$PROXY_C" || break
+    docker logs "$PROXY_C" 2>&1 | grep -q 'startup failed' && break   # fatal; the restart policy would loop
     sleep 1
   done
   if ! proxy_ok; then
     local logs; logs=$(docker logs --tail 40 "$PROXY_C" 2>&1)
+    docker stop "$PROXY_C" >/dev/null 2>&1   # our own container: stop the restart loop until the fix is in
     case $logs in
       *"KEK mismatch"*) die 1 reference_key_mismatch "Passport Cloud has a different reference key for this Proxy (409). See troubleshooting.md, 'Proxy keys lost'.";;
       *"rejected PASSPORT_PROXY_TOKEN"*) die 2 registration_token_rejected "The registration token was rejected (401). Copy a fresh token from the Proxy Configuration page into PASSPORT_PROXY_TOKEN in $f.";;
@@ -451,7 +457,7 @@ cmd_demo() {
 demo_apply() {
   local ns rg ref ep gr ar st objs='' reused i
   add() { objs="$objs${objs:+,}{\"type\":$(js "$1"),\"id\":$(js "$2"),\"reused\":$3}"; }
-  ns=$(find_id /public/v1/namespaces '.name == $v' "$DEMO_NS") || die 1 api_error "Listing Namespaces failed ($API_STATUS). $(api_err)"
+  ns=$(find_id /public/v1/namespaces '.name == $v' "$DEMO_NS") || die 1 api_error "Listing Namespaces failed ($(api_status)). $(api_err)"
   reused=true; [ -n "$ns" ] || { reused=false
     ns=$(create /public/v1/namespaces "$(jq -nc --arg n "$DEMO_NS" '{name:$n,description:"Passport onboarding demo"}')") || die 1 api_error "Creating the Namespace failed. $(api_err)"; }
   sset '.demo.ns = $v' "$ns"; add Namespace "$ns" $reused
@@ -518,7 +524,7 @@ handson_check() {
   item() { items="$items${items:+,}{\"object\":$(js "$1"),\"found\":$2${3:+,\"id\":$(js "$3")}}"; [ "$2" = true ] || missing=$((missing + 1)); }
   vault_ok && vexec kv get -format=json "secret/$HANDSON_SECRET" 2>/dev/null | jq -e '(.data.data.value // "") | length > 0' >/dev/null && secret=true
   item "HashiCorp Vault secret secret/$HANDSON_SECRET with key value" $secret
-  ns=$(find_id /public/v1/namespaces '.name == $v' "$HANDSON_NS") || die 1 api_error "Listing Namespaces failed ($API_STATUS). $(api_err)"
+  ns=$(find_id /public/v1/namespaces '.name == $v' "$HANDSON_NS") || die 1 api_error "Listing Namespaces failed ($(api_status)). $(api_err)"
   item "Namespace $HANDSON_NS" "$([ -n "$ns" ] && echo true || echo false)" "$ns"
   if [ -n "$ns" ]; then
     rg=$(find_id "/public/v1/namespaces/$ns/resource-groups" 'true' "")
