@@ -12,11 +12,11 @@ they live only in this table.
 | Term | What it is | In the app | In the public API |
 |---|---|---|---|
 | Passport Cloud | The hosted Passport Control Plane. Holds the rules (who may use which secret, on which API, for which operation) and never sees a secret value. | — | `api_url` |
-| Proxy | The data plane, in your network next to HashiCorp Vault (for one developer, in Docker on their machine). Checks each request against your Access Grants, swaps `{{vault:<id>}}` for the real value on the way out, and writes an audit log. | — | — |
+| Proxy | The data plane, in your network next to the Secret Vault (for one developer, in Docker on their machine). Checks each request against your Access Grants, swaps `{{vault:<id>}}` for the real value on the way out, and writes an audit log. | — | — |
 | Proxy Configuration | The app's record of your Proxy. It gives the Proxy ID and registration token the Proxy uses to register itself. One per zone. | Proxy Configuration | `GET /public/v1/proxies` (requested, not live yet) |
-| HashiCorp Vault | Runs on your machine in Docker. Holds the real secret values. | — | — |
-| Secret | A value in HashiCorp Vault at a path, stored as JSON key-value pairs. Passport reads the key `value`. | — | — |
-| Secret Reference | A pointer to a Vault path. Its UUID is what goes in `{{vault:<uuid>}}`. | Secret references | `secret-references` |
+| Secret Vault | Holds the real secret values, next to the Proxy. The Proxy reads HashiCorp Vault, AWS Secrets Manager or Google Secret Manager. This setup runs HashiCorp Vault in Docker: call it Secret Vault (HashiCorp), never "HashiCorp Vault" alone, so it doesn't read as the only vault. | Vault type | `vaultType` |
+| Secret | A value in the Secret Vault at a path, stored as JSON key-value pairs. Passport reads the key `value`. | — | — |
+| Secret Reference | A pointer to a path in the Secret Vault. Its UUID is what goes in `{{vault:<uuid>}}`. | Secret references | `secret-references` |
 | Namespace | A group of related APIs and their access rules. | Namespace | `namespaces` |
 | Resource Group | One API and its Endpoints, named for the API (`Passport demo API`). Access is requested on it; it makes an Endpoint visible in the app. | Resource group | `resource-groups` |
 | Endpoint | The resource: a method, host and path Passport protects, with slots that map a header or query parameter to a Secret Reference. | Endpoint; a slot is "Sent in" | `endpoints`; slot = `secrets[].label` |
@@ -34,7 +34,7 @@ your client certificate      from `passport login`; lists the Endpoints granted 
     └─ Endpoint              method + host + path, in a Namespace
        └─ slot               a header or query parameter, mapped to …
           └─ Secret Reference    a UUID; this is what goes in {{vault:<uuid>}}
-             └─ Secret          in HashiCorp Vault next to the Proxy; never leaves it
+             └─ Secret          in the Secret Vault next to the Proxy; never leaves it
 ```
 
 The Proxy checks every link before it swaps the pointer for the real value.
@@ -75,11 +75,11 @@ The Proxy checks every link before it swaps the pointer for the real value.
 Both are made once with `openssl genrsa` and required: the Proxy refuses to
 start without either. Never regenerate `ref.pem`.
 
-## HashiCorp Vault in this setup
+## Secret Vault (HashiCorp) in this setup
 
 - Persistent: secrets live on a Docker volume and survive restarts. The
   container unlocks itself at start.
-- The Proxy and the Vault UI both use the root token (`VAULT_TOKEN` in
+- The Proxy and the Secret Vault (HashiCorp) UI both use the root token (`VAULT_TOKEN` in
   `~/.passport/onboarding/proxy.env`). In production, the Proxy gets its own
   read-only token and people sign in as themselves.
 - `VAULT_ADDR` and `VAULT_TOKEN` are HashiCorp's own variable names, not
@@ -111,7 +111,7 @@ start without either. Never regenerate `ref.pem`.
   upstream failing; read that header and `x-passport-proxy-refs` first.
 - A `401` from the upstream, in order of likelihood: the grant is pending or
   expired; the request didn't go through the Proxy; the token is a Reference
-  name instead of its UUID; the Reference points at a missing Vault path or a
+  name instead of its UUID; the Reference points at a missing Secret Vault path or a
   secret without the key `value`; the credential belongs in a different slot.
 
 ## The demo API

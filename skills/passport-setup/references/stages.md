@@ -19,13 +19,13 @@ guidance for you.
 
 Menu, header "Setup type":
 
-- **"Just me, on this machine"**: "The Proxy and HashiCorp Vault run in Docker
+- **"Just me, on this machine"**: "The Proxy and a Secret Vault (HashiCorp) run in Docker
   here, for you and your agents on this machine."
 - **"A team (coming soon)"**: "Hosted in the cloud and shared by the whole team."
 
 A team: say it's coming soon and offer the same menu again with "Stop for now".
 Just me: `passport-onboard mark setup-type`, then say: **"By the end you'll
-have a Proxy and HashiCorp Vault running in Docker on this machine, the
+have a Proxy and a Secret Vault (HashiCorp) running in Docker on this machine, the
 Passport CLI signed in, a working demo call, and you'll have done one full
 cycle yourself: stored a secret, registered an API, and called it with only a
 pointer."**
@@ -60,10 +60,10 @@ Wait until they say they're signed in, then `passport-onboard mark account`.
 
 ## 5. Local Vault — agent
 
-Say first: **"I'm starting HashiCorp Vault in Docker on this machine. It holds
+Say first: **"I'm starting the Secret Vault (HashiCorp) in Docker on this machine. It holds
 the real secret values; Passport Cloud never sees them."**
 
-Run `passport-onboard vault up`. Report the container, the Vault UI address
+Run `passport-onboard vault up`. Report the container, the Secret Vault (HashiCorp) UI address
 (`data.ui`) and that the demo secret is stored at `secret/demo-api-key`.
 
 ## 6. Proxy — user and agent
@@ -82,7 +82,7 @@ Run `passport-onboard vault up`. Report the container, the Vault UI address
    **"Your key works. One thing to know: keeping an API key in a file like this
    isn't safe — any program running as you, including me, can read it. That's
    the exact problem Passport solves. In the Hands-on step at the end you'll
-   move a new key into HashiCorp Vault and revoke this one."**
+   move a new key into the Secret Vault (HashiCorp) and revoke this one."**
 4. The Proxy Configuration. Say: **"In the Passport app, open Proxy
    Configuration and create one; pick any name. Copy its Proxy ID and
    registration token into `~/.passport/onboarding/proxy.env`, after
@@ -126,7 +126,7 @@ Run `passport login`, wait for it to finish, then `passport-onboard cli check`.
    demo API received (`data.keyReceived`, masked) and its length (19), and
    `data.proxyRequestId`. Then say: **"Your request carried only
    `{{vault:<id>}}`. The Proxy checked your Access Grant, fetched the real key
-   from HashiCorp Vault and sent it on. The demo API answered 200 because it
+   from the Secret Vault (HashiCorp) and sent it on. The demo API answered 200 because it
    received the real key."**
 
 ## 9. Tour — user
@@ -140,13 +140,13 @@ Menu, header "Tour": **"Continue"** / **"Stop for now"**. On Continue,
 
 ## 10. Hands-on — the user builds it, the agent checks
 
-Say: **"Now you do one full cycle yourself: store a key in HashiCorp Vault,
+Say: **"Now you do one full cycle yourself: store a key in the Secret Vault (HashiCorp),
 register an API, and call it with only a pointer. The API is Passport's own
 public API, so afterwards I can manage Passport for you without ever holding a
 key."** Run `passport-onboard handson plan` for the values below.
 
 1. **Store a new key.** "Create a second API key in the app. Then open
-   HashiCorp Vault's UI at `<data.vault.ui>` and sign in with method *Token*.
+   the Secret Vault (HashiCorp) UI at `<data.vault.ui>` and sign in with method *Token*.
    Your token is the `VAULT_TOKEN` value in `~/.passport/onboarding/proxy.env`,
    the same token the Proxy uses. Create a secret in `secret` at path
    `passport-api-key`. A secret is a set of key-value pairs: put your API key

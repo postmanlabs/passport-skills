@@ -2,8 +2,8 @@
 name: passport-setup
 description: >
   Set up Postman Passport for one developer on their own machine (macOS or Linux): a Passport Proxy
-  and HashiCorp Vault in Docker, the Passport CLI signed in, a verified demo call, and a hands-on
-  round where the user stores a key in Vault and calls an API with only a pointer. Use when the user
+  and a Secret Vault (HashiCorp) in Docker, the Passport CLI signed in, a verified demo call, and a hands-on
+  round where the user stores a key in the Secret Vault (HashiCorp) and calls an API with only a pointer. Use when the user
   says "set up passport", "setup passport", "run Passport locally", "install the Passport proxy",
   or wants to stop putting API keys in .env files and doesn't have Passport running yet. Also use
   to resume or check an earlier Passport setup on this machine. Once Passport is set up, the
@@ -22,7 +22,7 @@ is in `references/stages.md`; follow it in order.
 ## Rules
 
 1. **Secrets never go through the chat.** The user pastes them into the files
-   or the HashiCorp Vault UI the stages name. If a secret lands in the chat
+   or the Secret Vault (HashiCorp) UI the stages name. If a secret lands in the chat
    anyway, tell the user to revoke it and make a new one.
 2. **Never read `~/.passport/passportrc`** (or `~/.passport-beta/passportrc`).
    It holds live CLI tokens. Never print the contents of the files in
@@ -36,13 +36,13 @@ is in `references/stages.md`; follow it in order.
    the user says yes. Commands that need `sudo`, and the Passport CLI
    installer, the user runs in their own terminal.
 6. **What the user types is always a real tool:** the Passport app, the
-   HashiCorp Vault UI, their editor, `passport`, `docker`, an installer. Never
+   Secret Vault (HashiCorp) UI, their editor, `passport`, `docker`, an installer. Never
    ask the user to run `passport-onboard`; it's yours.
 7. **Report what the script reports.** One line per check, failures included.
    On an error, stop, show `error.hint`, look the code up in
    `references/troubleshooting.md`, and don't retry silently.
 8. **Name stages by what they do** ("the Proxy stage"), never by number.
-9. **Use the glossary's capitalised terms** (Proxy, HashiCorp Vault, Secret
+9. **Use the glossary's capitalised terms** (Proxy, Secret Vault, Secret
    Reference, Namespace, Endpoint, Access Grant, Proxy Configuration) and say
    "Passport Cloud", never "Postman Cloud".
 
@@ -66,7 +66,7 @@ paste raw JSON at the user. State lives in `~/.passport/onboarding/state.json`.
 | `status` / `status --line` | OS check, what's done (checked against Docker and the CLI), the progress line |
 | `mark <stage>` | Records a stage the user finished: `welcome`, `setup-type`, `account`, `tour` |
 | `doctor` | Machine check, with an install command for anything missing |
-| `vault up` · `vault check <path>` | Starts HashiCorp Vault; checks a secret exists with the key `value` |
+| `vault up` · `vault check <path>` | Starts the Secret Vault (HashiCorp); checks a secret exists with the key `value` |
 | `proxy prepare` · `key check` · `proxy start` | The Proxy's keys and files; the API key and team; start and registration |
 | `cli check` | Is the Passport CLI signed in |
 | `demo plan` · `demo apply` · `demo verify` | The demo objects and the proof call |
@@ -101,9 +101,9 @@ Coming back later: `status` reports `resume: true`; follow "Coming back" in
 - Docker: `passport-vault`, `passport-proxy`, network `passport-net`, volume
   `passport-vault-data`, all labelled `com.postman.passport-onboarding`.
 - `~/.passport/onboarding/`: `state.json`; `proxy.env` (the Proxy's settings,
-  including the Vault token); `api-key.env` until the hands-on deletes it;
+  including the Secret Vault token); `api-key.env` until the hands-on deletes it;
   `keys/` (the Proxy's two private keys); `audit/` (the Proxy's audit log, which
-  its console shows); `vault/` (HashiCorp Vault's unseal key and root token,
+  its console shows); `vault/` (the Secret Vault (HashiCorp) unseal key and root token,
   and its config).
 - The Passport CLI and its login in `~/.passport/`.
 

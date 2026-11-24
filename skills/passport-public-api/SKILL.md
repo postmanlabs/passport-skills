@@ -90,7 +90,7 @@ References). If the user's vault isn't ready, create the Endpoints first and
    `{name, vaultType, vaultKey}`. **Stop and ask the user** for the vault type
    and the path; neither is guessable. On the local setup it's `hashicorp` and a
    path under `secret/` (`weather-key`, not `secret/data/weather-key`) whose
-   value sits under the key `value`; the user stores it in the HashiCorp Vault
+   value sits under the key `value`; the user stores it in the Secret Vault (HashiCorp)
    UI. If they paste the secret value instead, don't use it: they store it in
    the vault and give you the path.
 4. **Endpoints** — `POST /public/v1/namespaces/{namespaceId}/endpoints`

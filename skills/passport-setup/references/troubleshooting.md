@@ -11,10 +11,10 @@ don't retry silently. What has been tested is in `verification.md`.
 | `unsupported_os` | Not macOS or Linux | Stop. Windows isn't supported yet. |
 | `missing_tool` | A tool the step needs is absent | Run `doctor`; stage 3. |
 | `name_taken` | A container named `passport-vault` or `passport-proxy` exists but this skill didn't make it | Never touch it. The user renames or removes it. |
-| `docker_network`, `docker_volume`, `vault_start`, `vault_not_ready` | Docker couldn't start HashiCorp Vault | Check Docker is running; `docker logs passport-vault`. |
-| `vault_init`, `vault_unseal`, `vault_kv`, `vault_seed` | HashiCorp Vault started but a setup command failed | `docker logs passport-vault`; rerun `vault up` (it's safe to repeat). |
-| `vault_key_missing` | Vault is locked and its unseal key is gone | See **HashiCorp Vault data lost**. |
-| `vault_down`, `vault_first` | A later step needs HashiCorp Vault running | `vault up`. |
+| `docker_network`, `docker_volume`, `vault_start`, `vault_not_ready` | Docker couldn't start the Secret Vault (HashiCorp) | Check Docker is running; `docker logs passport-vault`. |
+| `vault_init`, `vault_unseal`, `vault_kv`, `vault_seed` | The Secret Vault (HashiCorp) started but a setup command failed | `docker logs passport-vault`; rerun `vault up` (it's safe to repeat). |
+| `vault_key_missing` | The Secret Vault (HashiCorp) is locked and its unseal key is gone | See **Secret Vault (HashiCorp) data lost**. |
+| `vault_down`, `vault_first` | A later step needs the Secret Vault (HashiCorp) running | `vault up`. |
 | `keygen` | openssl couldn't create the Proxy's keys | Check `openssl version`; rerun `proxy prepare`. |
 | `prepare_first` | The files the user fills in don't exist yet | `proxy prepare`. |
 | `key_empty` | `PASSPORT_API_KEY` in `api-key.env` is blank | The user pastes the key and saves the file. |
@@ -42,11 +42,11 @@ don't retry silently. What has been tested is in `verification.md`.
 |---|---|
 | `502` with `x-passport-proxy-error: unsupported-vault-type` | The Secret Reference's vault type isn't one this Proxy reads. Use HashiCorp. |
 | `x-passport-proxy-error: missing-ref` or `unauthorized` | No Access Grant covers this `METHOD host/path`, or the certificate predates the grant: `passport refresh`. |
-| `x-passport-proxy-error: vault-error` | HashiCorp Vault is down or locked: `vault up`. |
+| `x-passport-proxy-error: vault-error` | The Secret Vault (HashiCorp) is down or locked: `vault up`. |
 | Demo API answers 401 with `"key":"{{vau…"` | The pointer arrived unchanged: the request skipped the Proxy (old terminal without `HTTPS_PROXY`, or a `NO_PROXY` host), or it used the Reference's name instead of its UUID. |
 | `not authorized for vault refs` though the grant exists | The Endpoint `host` was stored with a port. Recreate it with a bare host, then `passport refresh`. |
 | `failed to decrypt vault reference: <uuid>` | The Reference was encrypted for another Proxy. Create it again now that yours is the team's Proxy. |
-| Secret value empty or not found | The Vault path or key is wrong: path relative to `secret/`, value under the key `value`. `vault check <path>` reports both. |
+| Secret value empty or not found | The Secret Vault path or key is wrong: path relative to `secret/`, value under the key `value`. `vault check <path>` reports both. |
 | Endpoint works but isn't in the app | It has no Resource Group. Attach one. |
 | `code=WORKOS_REAUTH_REQUIRED` | The CLI's login lapsed: `passport login`. |
 | `echo $HTTPS_PROXY` is empty after login | The terminal predates login. Open a new one. |
@@ -67,13 +67,13 @@ no automatic fix. The user can delete the Proxy Configuration in the app and
 start the Proxy stage again; the demo and hands-on References then need
 creating again.
 
-## HashiCorp Vault data lost
+## Secret Vault (HashiCorp) data lost
 
 If the `passport-vault-data` volume or `~/.passport/onboarding/vault/` is
-gone, run `vault up`: it creates a fresh Vault, stores the demo secret again
+gone, run `vault up`: it creates a fresh Secret Vault (HashiCorp), stores the demo secret again
 and writes the new `VAULT_TOKEN` into `proxy.env`. Then `proxy start` (it
 recreates the Proxy so it reads the new token). The user stores the hands-on
-secret again in the Vault UI. References keep working: they point at paths.
+secret again in the Secret Vault (HashiCorp) UI. References keep working: they point at paths.
 
 ## Coming back to a broken setup
 
@@ -81,7 +81,7 @@ secret again in the Vault UI. References keep working: they point at paths.
 |---|---|
 | Docker isn't running | The user starts Docker Desktop, OrbStack or Colima. |
 | A container stopped | `vault up` / `proxy start` start it again. |
-| HashiCorp Vault locked | It unlocks itself at start; if not, `vault up` unlocks it. |
+| Secret Vault (HashiCorp) locked | It unlocks itself at start; if not, `vault up` unlocks it. |
 | Registration token rejected | `registration_token_rejected` above. |
 | CLI signed out | `passport login`. |
 | The API key's team differs from the one recorded | Ask which team to continue with; a different team starts again from the Account stage. |

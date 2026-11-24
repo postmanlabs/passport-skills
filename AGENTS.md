@@ -2,7 +2,7 @@
 
 This repository is the **Postman Passport** skills, shipped as one `passport` plugin with two skills,
 each self-contained in its own folder under `skills/`:
-- `skills/passport-setup/` — set up Passport on this machine (a Proxy and HashiCorp Vault in Docker,
+- `skills/passport-setup/` — set up Passport on this machine (a Proxy and a Secret Vault (HashiCorp) in Docker,
   macOS and Linux), verify it with a demo call, then a hands-on round.
 - `skills/passport-public-api/` — once Passport is set up, register APIs and manage credentials (Secret
   References, bindings, access requests) through the Passport public API.
@@ -35,7 +35,7 @@ it points back to `passport-setup`.
   `references/stages.md`. Vocabulary and the why: `shared/concepts.md`. Every URL, image and version:
   `shared/urls.env`. Symptoms and fixes: `references/troubleshooting.md`. What was tested and when:
   `references/verification.md` (not inline "verified on" notes). Link to the home instead of copying it.
-- **The user only types real tools** (the Passport app, the HashiCorp Vault UI, `passport`, `docker`, an
+- **The user only types real tools** (the Passport app, the Secret Vault (HashiCorp) UI, `passport`, `docker`, an
   editor). `scripts/passport-onboard` is the agent's; never hand it to the user.
 - **Point at a file and a heading or step**, and update every pointer when you rename. Paths inside a
   skill are relative to its folder. CI checks that every `references/`, `scripts/` and `templates/` path

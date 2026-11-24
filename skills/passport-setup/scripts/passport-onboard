@@ -202,10 +202,10 @@ cmd_doctor() {
   }
   case $os in Darwin|Linux) ;; *) die 3 unsupported_os "Passport setup supports macOS and Linux. Windows isn't supported yet.";; esac
   if ! command -v docker >/dev/null 2>&1; then
-    row docker "Runs HashiCorp Vault and the Proxy on this machine" missing "Install Docker Desktop, OrbStack or Colima (macOS) or Docker Engine (Linux): https://docs.docker.com/get-docker/"
+    row docker "Runs the Secret Vault (HashiCorp) and the Proxy on this machine" missing "Install Docker Desktop, OrbStack or Colima (macOS) or Docker Engine (Linux): https://docs.docker.com/get-docker/"
   elif ! docker info >/dev/null 2>&1; then
-    row docker "Runs HashiCorp Vault and the Proxy on this machine" not-running "Start Docker (Docker Desktop, OrbStack or Colima), then check again"
-  else row docker "Runs HashiCorp Vault and the Proxy on this machine" ok; fi
+    row docker "Runs the Secret Vault (HashiCorp) and the Proxy on this machine" not-running "Start Docker (Docker Desktop, OrbStack or Colima), then check again"
+  else row docker "Runs the Secret Vault (HashiCorp) and the Proxy on this machine" ok; fi
   for t in curl jq openssl; do
     case $t in
       curl) p="Calls the Passport API and downloads the CLI";;
@@ -259,7 +259,7 @@ vault_up() {
     running "$VAULT_C" || docker start "$VAULT_C" >/dev/null || die 1 vault_start "docker start $VAULT_C failed"
   else
     vault_run 127.0.0.1:8200:8200 || { docker rm -f "$VAULT_C" >/dev/null 2>&1; vault_run 127.0.0.1::8200; } \
-      || die 1 vault_start "Couldn't start HashiCorp Vault. Check: docker logs $VAULT_C"
+      || die 1 vault_start "Couldn't start the Secret Vault (HashiCorp). Check: docker logs $VAULT_C"
   fi
   for i in $(seq 1 60); do
     status=$(docker exec "$VAULT_C" vault status -format=json 2>/dev/null) && break
@@ -267,7 +267,7 @@ vault_up() {
     sleep 1
   done
   # Our own container: stop it so its restart policy doesn't loop on a broken start.
-  [ -n "$status" ] || { docker stop "$VAULT_C" >/dev/null 2>&1; die 1 vault_not_ready "HashiCorp Vault didn't answer within 60 s; stopped it. Check: docker logs $VAULT_C"; }
+  [ -n "$status" ] || { docker stop "$VAULT_C" >/dev/null 2>&1; die 1 vault_not_ready "The Secret Vault (HashiCorp) didn't answer within 60 s; stopped it. Check: docker logs $VAULT_C"; }
   init=$(printf '%s' "$status" | jq -r .initialized)
   if [ "$init" != true ]; then
     init=$(docker exec "$VAULT_C" vault operator init -key-shares=1 -key-threshold=1 -format=json) || die 1 vault_init "vault operator init failed"
@@ -276,8 +276,8 @@ vault_up() {
      printf '%s' "$init" | jq -r '.root_token' > "$ONB/vault/root-token")
   fi
   if ! docker exec "$VAULT_C" vault status >/dev/null 2>&1; then
-    key=$(cat "$ONB/vault/unseal/unseal-key" 2>/dev/null) || die 3 vault_key_missing "HashiCorp Vault is locked and its unseal key is gone from $ONB/vault/unseal. See troubleshooting.md, 'HashiCorp Vault data lost'."
-    docker exec "$VAULT_C" vault operator unseal "$key" >/dev/null || die 1 vault_unseal "Couldn't unlock HashiCorp Vault"
+    key=$(cat "$ONB/vault/unseal/unseal-key" 2>/dev/null) || die 3 vault_key_missing "The Secret Vault (HashiCorp) is locked and its unseal key is gone from $ONB/vault/unseal. See troubleshooting.md, 'Secret Vault (HashiCorp) data lost'."
+    docker exec "$VAULT_C" vault operator unseal "$key" >/dev/null || die 1 vault_unseal "Couldn't unlock the Secret Vault (HashiCorp)"
   fi
   vexec secrets list -format=json 2>/dev/null | jq -e 'has("secret/")' >/dev/null \
     || vexec secrets enable -path=secret kv-v2 >/dev/null || die 1 vault_kv "Couldn't enable the secret/ store"
@@ -295,7 +295,7 @@ vault_run() { # host-port mapping
 vault_check() { # path under secret/ — reports presence of the key "value", never the value
   local path=${1:-}
   [ -n "$path" ] || die 1 usage "passport-onboard vault check <path>"
-  vault_ok || die 3 vault_down "HashiCorp Vault isn't running. Run: passport-onboard vault up"
+  vault_ok || die 3 vault_down "The Secret Vault (HashiCorp) isn't running. Run: passport-onboard vault up"
   if ! vexec kv metadata get "secret/$path" >/dev/null 2>&1; then
     emit "{\"path\":$(js "secret/$path"),\"exists\":false,\"hasValue\":false,\"ui\":$(js "$(vault_ui)")}" user "No secret at secret/$path yet"; exit 2
   fi
@@ -323,7 +323,7 @@ proxy_urls() { # sets PUB_URL MGMT_URL from free ports and *.localhost resolutio
 }
 proxy_prepare() {
   need openssl jq; state_init
-  [ -s "$ONB/vault/root-token" ] || die 3 vault_first "Set up HashiCorp Vault first: passport-onboard vault up"
+  [ -s "$ONB/vault/root-token" ] || die 3 vault_first "Set up the Secret Vault (HashiCorp) first: passport-onboard vault up"
   (umask 077; mkdir -p "$ONB/keys" "$ONB/audit"
    [ -s "$ONB/keys/ca.pem" ] || openssl genrsa -out "$ONB/keys/ca.pem" 2048 2>/dev/null
    [ -s "$ONB/keys/ref.pem" ] || openssl genrsa -out "$ONB/keys/ref.pem" 2048 2>/dev/null) \
@@ -391,7 +391,7 @@ proxy_start() {
   [ -n "$(env_get "$f" PASSPORT_PROXY_ID)" ] || die 2 proxy_id_empty "PASSPORT_PROXY_ID in $f is still empty"
   [ -n "$(env_get "$f" PASSPORT_PROXY_TOKEN)" ] || die 2 proxy_token_empty "PASSPORT_PROXY_TOKEN in $f is still empty"
   [ -n "$(env_get "$f" PASSPORT_PROXY_ALLOWED_TEAM_IDS)" ] || die 3 team_unknown "Team ID not known yet. Run: passport-onboard key check"
-  vault_ok || die 3 vault_down "HashiCorp Vault isn't running. Run: passport-onboard vault up"
+  vault_ok || die 3 vault_down "The Secret Vault (HashiCorp) isn't running. Run: passport-onboard vault up"
   sha=$(openssl dgst -sha256 "$f" | awk '{print $NF}')
   if exists "$PROXY_C"; then
     ours "$PROXY_C" || die 3 name_taken "A container named $PROXY_C exists and wasn't made by this skill. Rename or remove it yourself, then rerun."
@@ -531,7 +531,7 @@ handson_check() {
   local ns='' ep='' rg='' ref='' gr='' secret=false missing=0 items=''
   item() { items="$items${items:+,}{\"object\":$(js "$1"),\"found\":$2${3:+,\"id\":$(js "$3")}}"; [ "$2" = true ] || missing=$((missing + 1)); }
   vault_ok && vexec kv get -format=json "secret/$HANDSON_SECRET" 2>/dev/null | jq -e '(.data.data.value // "") | length > 0' >/dev/null && secret=true
-  item "HashiCorp Vault secret secret/$HANDSON_SECRET with key value" $secret
+  item "Secret Vault (HashiCorp) secret secret/$HANDSON_SECRET with key value" $secret
   ns=$(find_id /public/v1/namespaces '.name == $v' "$HANDSON_NS") || die 1 api_error "Listing Namespaces failed ($(api_status)). $(api_err)"
   item "Namespace $HANDSON_NS" "$([ -n "$ns" ] && echo true || echo false)" "$ns"
   if [ -n "$ns" ]; then
@@ -591,7 +591,7 @@ passport-onboard — agent-side helper for the passport-setup skill (the user ne
   status [--line]      where setup stands; --line prints the progress line
   mark <stage>         record a stage the user finished ($STAGES)
   doctor               machine check
-  vault up             start HashiCorp Vault (persistent, unlocks itself), seed the demo secret
+  vault up             start the Secret Vault (HashiCorp) (persistent, unlocks itself), seed the demo secret
   vault check <path>   does secret/<path> exist with a key named value (never prints it)
   proxy prepare        create the Proxy's keys and the two files the user fills in
   key check            check the API key: team admin, team ID, existing Proxy Configuration

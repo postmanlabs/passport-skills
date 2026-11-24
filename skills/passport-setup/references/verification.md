@@ -12,7 +12,7 @@ marked as such; it isn't a test.
   correct JSON and exit codes; unknown stage exits 1.
 - `vault up`: starts `hashicorp/vault:2.2.1`, initialises it, enables
   `secret/` (KV v2), stores `secret/demo-api-key`. Running it twice changes
-  nothing. After `docker restart` the Vault is unlocked again. After the
+  nothing. After `docker restart` the Secret Vault is unlocked again. After the
   container is removed and recreated, the secrets are still there. The UI
   answers 200.
 - `vault check`: reports a missing path, and a secret without the key `value`,
@@ -45,7 +45,7 @@ paginated lists without writes, a pending Access Request and a 500;
 `handson check` complete and incomplete, `verify` through the Secret
 Reference, `finish` with the first key still live and revoked; public API
 calls through the Proxy after the hands-on; no network, an API error during the hands-on check, a non-JSON reply, and an expired CLI sign-in mid-call, each reported as a clear error; `status` resuming, and noticing a
-stopped Vault and a signed-out CLI.
+stopped Secret Vault and a signed-out CLI.
 
 ## Not run yet
 
@@ -53,7 +53,7 @@ Blocked by missing pieces (dependencies list): `key check` against a real
 `GET /public/v1/me`, a real Proxy registration (needs a public Proxy image and
 a real token), and everything after it against beta: `passport login` finding
 the Proxy, `demo apply/verify`, `handson check/verify/finish`, resume after a
-reboot. HashiCorp Vault and the Proxy on Linux Docker.
+reboot. The Secret Vault (HashiCorp) and the Proxy on Linux Docker.
 
 ## Read in source, not run (beta, 2026-11-24)
 

@@ -1,7 +1,7 @@
 #!/bin/sh
-# Container start command for the local HashiCorp Vault: start the server, then
+# Container start command for the local Secret Vault (HashiCorp): start the server, then
 # unlock it with the key the skill saved, so a restart or reboot never leaves it
-# locked. Before the first init there is no key yet; the skill initialises Vault.
+# locked. Before the first init there is no key yet; the skill initialises the Secret Vault.
 vault server -config=/vault/config/vault.hcl &
 pid=$!
 key=/vault/unseal/unseal-key

@@ -1,4 +1,4 @@
-# HashiCorp Vault for a local Passport setup: one node, data on a Docker volume,
+# Secret Vault (HashiCorp) for a local Passport setup: one node, data on a Docker volume,
 # web UI on (reached through a 127.0.0.1-only port), no TLS inside Docker.
 ui            = true
 disable_mlock = true

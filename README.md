@@ -10,7 +10,7 @@ One `passport` plugin, two skills:
 
 | Skill | Use it to | Starts when |
 |---|---|---|
-| [`passport-setup`](skills/passport-setup/SKILL.md) | Set up a Passport Proxy and HashiCorp Vault in Docker on your machine, run a verified demo call, then build one API yourself | you say **`setup passport`** |
+| [`passport-setup`](skills/passport-setup/SKILL.md) | Set up a Passport Proxy and a Secret Vault (HashiCorp) in Docker on your machine, run a verified demo call, then build one API yourself | you say **`setup passport`** |
 | [`passport-public-api`](skills/passport-public-api/SKILL.md) | Register APIs and manage credentials (Secret References, bindings, access requests) through the Passport public API | a task needs an API credential instead of a `.env` file |
 
 `passport-public-api` assumes Passport is already set up; if it isn't, it points back to `passport-setup`.
@@ -52,7 +52,7 @@ The agent reads `AGENTS.md`, which points it at the right skill. The stage-by-st
 - A Passport account; the skill helps you sign up. You need to be a team admin; a new signup is one.
 
 ## Safety
-Secrets never go in the chat: you paste them into files on your machine or into the HashiCorp Vault UI.
+Secrets never go in the chat: you paste them into files on your machine or into the Secret Vault (HashiCorp) UI.
 The skill never reads the CLI's `passportrc`, never approves its own access requests, shows its plan
 before creating anything, and never deletes anything it didn't make.
 
@@ -65,8 +65,7 @@ agent runs in your terminal once a skill is in use.
 - **Docker:** `hashicorp/vault` and the Passport Proxy image, pulled anonymously (exact tags in
   [`references/urls.env`](skills/passport-setup/references/urls.env)). Containers `passport-vault` and
   `passport-proxy`, network `passport-net`, volume `passport-vault-data`, all on `127.0.0.1` only.
-- **Files:** `~/.passport/onboarding/` holds setup state, the Proxy's settings and keys, and HashiCorp
-  Vault's unseal key and root token, all readable only by you.
+- **Files:** `~/.passport/onboarding/` holds setup state, the Proxy's settings and keys, and the Secret Vault (HashiCorp) unseal key and root token, all readable only by you.
 - **Passport services:** the Passport app and API for sign-in, the public API, and Proxy registration.
   The exact hosts are in `references/urls.env`.
 - **Verification calls:** a demo API (`references/urls.env`) and the Passport public API itself, both
@@ -81,7 +80,7 @@ skills/                   two skills, each self-contained (installs copy a skill
     SKILL.md              rules, the script's contract, the stage list
     references/           welcome, stages, troubleshooting, verification (+ the shared copies)
     scripts/              passport-onboard, the agent's helper (the user never runs it)
-    templates/            proxy.env, api-key.env, HashiCorp Vault config and start script
+    templates/            proxy.env, api-key.env, Secret Vault (HashiCorp) config and start script
   passport-public-api/
     SKILL.md              the whole skill
     references/           the shared copies

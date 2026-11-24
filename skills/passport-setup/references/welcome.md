@@ -25,7 +25,7 @@ swaps it for the real key on the way out, and only for APIs you've been granted.
 │   Passport Proxy (data plane) ◀─ rules ──┼─────┤ Passport Control Plane   │
 │       │      ▲                           │     │ who may use which secret │
 │       │      │  real key                 │     │ on which API, for which  │
-│       │   HashiCorp Vault                │     │ operation                │
+│       │   Secret Vault                   │     │ operation                │
 │       │                                  │     │                          │
 └───────┼──────────────────────────────────┘     │ never sees a secret      │
         │  request with the real key             └──────────────────────────┘
@@ -36,11 +36,13 @@ swaps it for the real key on the way out, and only for APIs you've been granted.
 - **Passport CLI** (`passport`): runs where you work. It signs you in and
   sends your requests to the Proxy with your client certificate, which says
   who you are. Its daemon can also route other tools' HTTPS traffic there.
-- **Passport Proxy**: the data plane, in your network next to HashiCorp
+- **Passport Proxy**: the data plane, in your network next to the Secret
   Vault. It checks each request against the rules, swaps the pointer for the
   real key, sends the request on, and writes an audit log. Real keys never
   leave your network except to the API they're for.
-- **HashiCorp Vault**: holds the real keys. Only the Proxy reads them.
+- **Secret Vault**: holds the real keys; only the Proxy reads them. Passport
+  works with HashiCorp Vault, AWS Secrets Manager and Google Secret Manager.
+  This setup runs HashiCorp Vault in Docker, shown as Secret Vault (HashiCorp).
 - **Passport Control Plane**: Passport Cloud, which you manage in the Passport
   app. It holds your team, your APIs and the rules, and sends the rules to the
   Proxy. It never sees a secret.
@@ -59,14 +61,14 @@ The steps:
 - **Setup type**: who this Passport is for.
 - **Machine check**: the tools it needs.
 - **Account**: sign up in the Passport app.
-- **Local Vault**: I start HashiCorp Vault.
+- **Local Vault**: I start the Secret Vault (HashiCorp).
 - **Proxy**: you create an API key and a Proxy Configuration in the app; I
   start the Proxy.
 - **CLI sign-in**: I run `passport login`; you approve it in the browser.
 - **Demo**: I create a demo API in Passport and call it with only a pointer.
 - **Tour**: the app shows you what the demo made.
-- **Hands-on**: you store a key in HashiCorp Vault, register Passport's own
-  API, and call it with only a pointer.
+- **Hands-on**: you store a key in the Secret Vault (HashiCorp), register
+  Passport's own API, and call it with only a pointer.
 
 You can stop after any step and pick up later by saying "set up passport"
 again.
