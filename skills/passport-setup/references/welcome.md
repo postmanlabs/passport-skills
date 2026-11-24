@@ -14,7 +14,7 @@ swaps it for the real key on the way out, and only for APIs you've been granted.
 ┌─ YOUR MACHINE ───────────────────────────┐
 │                                          │
 │   You or your agent                      │
-│       │  request with {{vault:<ref>}}    │
+│       │  request with {{vault:<id>}}     │
 │       ▼                                  │
 │   Passport CLI + its daemon              │
 │       │                                  │
@@ -49,7 +49,8 @@ swaps it for the real key on the way out, and only for APIs you've been granted.
 
 Four more words you'll see along the way:
 
-- **Secret Reference**: the pointer, `{{vault:<id>}}`, that your requests carry.
+- **Secret Reference**: where a secret lives in the Secret Vault. Your
+  requests never name it; they carry the pointer Passport issues you for it.
 - **Namespace**: a group of APIs and who may call them.
 - **Endpoint**: one method, host and path that Passport protects, such as
   `GET api.example.com/v1/orders`. A **Resource Group** holds the Endpoints of

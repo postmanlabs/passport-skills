@@ -92,8 +92,9 @@ vault_ui() { local hp; hp=$(docker port "$VAULT_C" 8200/tcp 2>/dev/null | head -
 
 # ---------- public API ----------
 # Before hands-on: the bootstrap key from api-key.env. After hands-on: through the
-# Proxy with the passport-api-key Secret Reference, so no key is ever in hand.
+# Proxy with the user's pointer for the passport-api-key slot, so no key is ever in hand.
 # Sets API_STATUS; the response body is in $API_BODY.
+HANDSON_EP="* $API_HOST/public/v1/*"
 api() { # METHOD PATH [JSON-BODY]
   local key ref args
   : > "$API_BODY"; chmod 600 "$API_BODY"
@@ -103,11 +104,19 @@ api() { # METHOD PATH [JSON-BODY]
     [ -n "${3-}" ] && args+=(-H 'Content-Type: application/json' --data-binary "$3")
     API_STATUS=$(printf 'header = "Authorization: Bearer %s"\n' "$key" | curl "${args[@]}" "$PASSPORT_API_URL$2") || API_STATUS=000
   else
-    ref=$(sget .handson.ref)
+    ref=$(pointer "$HANDSON_EP" "$HANDSON_SECRET")
     [ -n "$ref" ] || { API_STATUS=000; printf 000 > "$API_BODY.status"; return 1; }
     via_proxy "$1" "$PASSPORT_API_URL$2" "${3-}" "Authorization: Bearer {{vault:$ref}}"
   fi
   printf '%s' "$API_STATUS" > "$API_BODY.status"
+}
+# The pointer a request carries in {{vault:<pointer>}}: issued to this user for one slot of one
+# Endpoint under their Access Grant, and listed in the client certificate. It isn't the Secret
+# Reference's ID, and a new Access Grant issues a new one, so read it fresh from the certificate.
+pointer() { # "METHOD host/path" secret-reference-name
+  passport whoami --json 2>/dev/null | jq -r --arg ep "$1" --arg n "$2" '
+    (.allowedApiRefs[$ep] // []) as $refs
+    | (([$refs[] | select(.name == $n)] + (if ($refs | length) == 1 then $refs else [] end))[0].secretReference) // empty'
 }
 # passport request with headers shown; sets API_STATUS, body to $API_BODY,
 # and PROXY_ERR / PROXY_REQ from the response headers.
@@ -115,7 +124,7 @@ via_proxy() { # METHOD URL BODY HEADER
   local raw args
   args=(request --show-headers -X "$1" -H "$4" -H 'Accept: application/json')
   [ -n "${3-}" ] && args+=(-H 'Content-Type: application/json' -d "$3")
-  raw=$(passport "${args[@]}" "$2" 2>&1) || true
+  raw=$(passport "${args[@]}" -- "$2" 2>&1) || true   # -H takes values up to the next option; -- ends them
   API_STATUS=$(printf '%s\n' "$raw" | head -1 | grep -oE '(^| )[1-5][0-9][0-9]( |$)' | head -1 | tr -d ' ')
   [ -n "$API_STATUS" ] || API_STATUS=000
   CLI_REAUTH=''; case $raw in *WORKOS_REAUTH_REQUIRED*) CLI_REAUTH=1;; esac
@@ -519,14 +528,16 @@ demo_apply() {
 demo_verify() {
   need passport
   local ref key len st
-  ref=$(sget .demo.ref); [ -n "$ref" ] || die 3 demo_first "Run: passport-onboard demo apply"
+  [ -n "$(sget .demo.grant)" ] || die 3 demo_first "Run: passport-onboard demo apply"
   passport refresh >/dev/null 2>&1 || die 1 refresh_failed "passport refresh failed. Is the CLI signed in? Run: passport login"
+  ref=$(pointer "GET $PASSPORT_DEMO_API_HOST/" demo)
+  [ -n "$ref" ] || die 1 no_pointer "Your client certificate has no pointer for GET $PASSPORT_DEMO_API_HOST/ yet. Check the Access Grant is active in the app ($PASSPORT_APP_URL), then rerun."
   via_proxy GET "https://$PASSPORT_DEMO_API_HOST/" "" "x-demo-api-key: {{vault:$ref}}"
   [ -n "$CLI_REAUTH" ] && die 2 cli_signed_out "The Passport CLI's sign-in expired. Run: passport login"
   st=$(jq -r '.status // empty' "$API_BODY" 2>/dev/null); key=$(jq -r '.key // empty' "$API_BODY" 2>/dev/null); len=$(jq -r '.key_length // empty' "$API_BODY" 2>/dev/null)
   if [ "$st" = authenticated ] && [ "$len" = 19 ]; then
     mark_done demo
-    emit "{\"pass\":true,\"http\":$(js "$API_STATUS"),\"keyReceived\":$(js "$key"),\"keyLength\":$len,\"proxyRequestId\":$(js "${PROXY_REQ:-}")}"
+    emit "{\"pass\":true,\"http\":$(js "$API_STATUS"),\"pointer\":$(js "$ref"),\"keyReceived\":$(js "$key"),\"keyLength\":$len,\"proxyRequestId\":$(js "${PROXY_REQ:-}")}"
   else
     die 1 demo_failed "The demo call didn't pass (HTTP $API_STATUS, received ${key:-nothing}, length ${len:-?}${PROXY_ERR:+, proxy error $PROXY_ERR}). See troubleshooting.md."
   fi
@@ -540,7 +551,7 @@ cmd_handson() {
       {\"type\":\"Namespace\",\"name\":\"$HANDSON_NS\"},
       {\"type\":\"Resource Group\",\"name\":\"$HANDSON_RG\",\"host\":\"$API_HOST\"},
       {\"type\":\"Secret Reference\",\"name\":\"$HANDSON_SECRET\",\"vaultType\":\"hashicorp\",\"vaultPath\":\"$HANDSON_SECRET\"},
-      {\"type\":\"Endpoint\",\"method\":\"*\",\"host\":\"$API_HOST\",\"path\":\"/public/v1/*\",\"slot\":\"Authorization\",\"slotSecretReference\":\"$HANDSON_SECRET\",\"requestHeader\":\"Authorization: Bearer {{vault:<Secret Reference ID>}}\"},
+      {\"type\":\"Endpoint\",\"method\":\"*\",\"host\":\"$API_HOST\",\"path\":\"/public/v1/*\",\"slot\":\"Authorization\",\"slotSecretReference\":\"$HANDSON_SECRET\",\"requestHeader\":\"Authorization: Bearer {{vault:<your pointer>}}\"},
       {\"type\":\"Access Request\",\"on\":\"the Resource Group\",\"durationDays\":90}]}";;
     check) handson_check;;
     verify) handson_verify;;
@@ -580,8 +591,10 @@ handson_check() {
 }
 handson_verify() {
   need passport
-  local ref; ref=$(sget .handson.ref); [ -n "$ref" ] || die 3 check_first "Run: passport-onboard handson check"
+  local ref; [ -n "$(sget .handson.ref)" ] || die 3 check_first "Run: passport-onboard handson check"
   passport refresh >/dev/null 2>&1 || die 1 refresh_failed "passport refresh failed. Is the CLI signed in? Run: passport login"
+  ref=$(pointer "$HANDSON_EP" "$HANDSON_SECRET")
+  [ -n "$ref" ] || die 1 no_pointer "Your client certificate has no pointer for $HANDSON_EP yet. Check the Access Grant on $HANDSON_RG is active in the app ($PASSPORT_APP_URL), then rerun."
   via_proxy GET "$PASSPORT_API_URL/public/v1/namespaces" "" "Authorization: Bearer {{vault:$ref}}"
   [ -n "$CLI_REAUTH" ] && die 2 cli_signed_out "The Passport CLI's sign-in expired. Run: passport login"
   if [ "$API_STATUS" = 200 ] && jq -e --arg n "$HANDSON_NS" '[.data[]?.name] | index($n)' "$API_BODY" >/dev/null 2>&1; then

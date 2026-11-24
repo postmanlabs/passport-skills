@@ -35,6 +35,7 @@ don't retry silently. What has been tested is in `verification.md`.
 | `cli_signed_out` | The CLI's sign-in expired mid-call (`WORKOS_REAUTH_REQUIRED`) | `passport login`, then rerun the step. |
 | `demo_first`, `check_first`, `verify_first` | A step ran out of order | Run the step the hint names. |
 | `grant_missing` | Approved, but the Access Grant isn't visible yet | Wait a minute; rerun `demo apply`. |
+| `no_pointer` | The client certificate has no pointer for the Endpoint, even after `passport refresh`: no active Access Grant covers it yet | Check the Access Grant in the app (pending, expired, or on another Resource Group), then rerun. |
 | `demo_failed`, `handson_failed` | The call through the Proxy didn't pass | See **Calls through the Proxy**, using the HTTP status and proxy error in the hint. |
 | `api_error` | The public API returned an unexpected status, or no reply at all (status `000`: network or VPN) | Show the status and its `code`; don't retry. |
 
@@ -45,7 +46,7 @@ don't retry silently. What has been tested is in `verification.md`.
 | `502` with `x-passport-proxy-error: unsupported-vault-type` | The Secret Reference's vault type isn't one this Proxy reads. Use HashiCorp. |
 | `x-passport-proxy-error: missing-ref` or `unauthorized` | No Access Grant covers this `METHOD host/path`, or the certificate predates the grant: `passport refresh`. |
 | `x-passport-proxy-error: vault-error` | The Secret Vault (HashiCorp) is down or locked: `vault up`. |
-| Demo API answers 401 with `"key":"{{vau…"` | The pointer arrived unchanged: the request skipped the Proxy (old terminal without `HTTPS_PROXY`, or a `NO_PROXY` host), or it used the Reference's name instead of its UUID. |
+| Demo API answers 401 with `"key":"{{vau…"` | The pointer arrived unchanged: the request skipped the Proxy (old terminal without `HTTPS_PROXY`, or a `NO_PROXY` host), or it carried a Secret Reference's ID or name instead of the pointer from `passport whoami --json`. |
 | `not authorized for vault refs` though the grant exists | The Endpoint `host` was stored with a port. Recreate it with a bare host, then `passport refresh`. |
 | `failed to decrypt vault reference: <uuid>` | The Reference was encrypted for another Proxy. Create it again now that yours is the team's Proxy. |
 | Secret value empty or not found | The Secret Vault path or key is wrong: path relative to `secret/`, value under the key `value`. `vault check <path>` reports both. |

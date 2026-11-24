@@ -21,17 +21,18 @@ on it. URLs come from `references/urls.env` (`PASSPORT_API_URL`,
 ## The one thing to get right
 
 **This API never returns a secret value, and it never makes the third-party
-call for you.** A Secret Reference create returns an `id`; that UUID is the
-only handle, and it's what goes in the outgoing request:
+call for you.** The outgoing request carries a pointer, and the Passport Proxy
+swaps it for the real value:
 
 ```python
 headers = {"Authorization": "Bearer {{vault:43e9a5bc-b12b-49ff-b836-65208a2dcacb}}"}
 ```
 
-Send that request through the Passport Proxy, which swaps in the real value.
-Your code, logs and the conversation only ever hold the UUID. Use the UUID,
-never the Reference's name. Never ask the user for a secret value, and never
-send a `{{vault:…}}` token anywhere except through the Proxy.
+The pointer is the user's own, one per Endpoint slot their Access Grant covers,
+listed in the client certificate; it is not the Secret Reference's `id`. Read it
+from `passport whoami --json` (`references/concepts.md`, "Invariants"). Code,
+logs and the conversation only ever hold the pointer. Never ask the user for a
+secret value, and never send a `{{vault:…}}` token anywhere but the Proxy.
 
 ## Before you start
 
@@ -41,28 +42,29 @@ passport-setup skill; don't set Passport up from here. `WORKOS_REAUTH_REQUIRED`
 
 ## Authenticate: through the Proxy, never with a key in hand
 
-You call this API exactly the way any Passport user calls an API: with a
-Secret Reference, through the Proxy. The passport-setup skill's "Protect your first API" step
-creates it (Namespace `passport-api`, Secret Reference `passport-api-key`):
+You call this API the way any Passport user calls an API: with a pointer,
+through the Proxy. The passport-setup skill's "Protect your first API" step
+sets it up (Namespace `passport-api`, Secret Reference `passport-api-key`):
 
 ```bash
 . "$SKILL_DIR/references/urls.env"   # $SKILL_DIR = this skill's folder
-REF=$(jq -r '.handson.ref // empty' ~/.passport/onboarding/state.json)
+EP="* ${PASSPORT_API_URL#https://}/public/v1/*"
+REF=$(passport whoami --json | jq -r --arg ep "$EP" \
+  '.allowedApiRefs[$ep][]? | select(.name == "passport-api-key") | .secretReference')
 passport request -H "Authorization: Bearer {{vault:$REF}}" -H 'Accept: application/json' \
-  "$PASSPORT_API_URL/public/v1/namespaces"
+  -- "$PASSPORT_API_URL/public/v1/namespaces"
 passport request -X POST -H "Authorization: Bearer {{vault:$REF}}" \
   -H 'Content-Type: application/json' -d '{"name":"weather-app"}' \
-  "$PASSPORT_API_URL/public/v1/namespaces"
+  -- "$PASSPORT_API_URL/public/v1/namespaces"
 ```
 
-- No `state.json`, or no `handson.ref`: ask the user for the ID of the Secret
-  Reference that holds their Passport API key. Never ask for the key itself,
-  and never fall back to a raw key in an env variable or file.
-- A `401`, or `x-passport-proxy-error: unauthorized`, on these calls usually
-  means the Access Grant on `passport-api` expired (7, 30 or 90 days). You
-  can't renew it through the API it guards: the user requests access again in
-  the app.
-- After any grant change, `passport refresh`.
+- `REF` empty, or a `401` / `x-passport-proxy-error: unauthorized`: run
+  `passport refresh`, read `REF` again, retry once. Still failing: no Access
+  Grant covers that Endpoint. "Protect your first API" isn't done (use the
+  passport-setup skill), or the grant on `passport-api` expired (7, 30 or 90
+  days) and the user requests access again in the app; it can't be renewed
+  through the API it guards. Never ask for the key itself, and never fall back
+  to a raw key in an env variable or file.
 
 ## Which role do you hold?
 
@@ -71,8 +73,9 @@ passport request -X POST -H "Authorization: Bearer {{vault:$REF}}" \
 | A team admin's user key | `admin` | Full catalog create, read, update, delete, and access requests including approve/reject |
 | A team member's user key | `member` | Reads, and create/list/get/cancel their own access requests |
 
-No endpoint reports your role. A mutation returning `403 FORBIDDEN` means a
-member key: say so and switch to Track B rather than retrying.
+`GET /public/v1/me` reports it as `data.role`, with `data.teamId`. A mutation
+returning `403 FORBIDDEN` means a member key: say so and switch to Track B
+rather than retrying.
 
 ## Track A — admin: build the catalog
 
@@ -103,7 +106,9 @@ References). If the user's vault isn't ready, create the Endpoints first and
    `resourceGroupIds` the same way.
 
 **Done when** `GET /public/v1/endpoints/{endpointId}/secret-bindings` lists
-every intended label with a non-null `secretReferenceId`.
+every intended label with a non-null `secretReferenceId`. To call the API,
+request access as in Track B, step 2 (an admin's own request is approved by the
+service), run `passport refresh`, then read the pointers.
 
 **Failures:** `409` on a Reference create = the name exists in that Namespace
 (reuse it). `409` on a delete = still bound; unbind first. `422`/`503` = the
@@ -133,7 +138,8 @@ think the task needs: that would be an agent granting itself a credential.
 ## Make the call through the Proxy
 
 - **`passport request`** for anything you send yourself:
-  `passport request -X POST -H 'Authorization: Bearer {{vault:<id>}}' https://api.example.com/v1/x`.
+  `passport request -X POST -H 'Authorization: Bearer {{vault:<pointer>}}' -- https://api.example.com/v1/x`.
+  The `--` keeps the URL from being read as one more header.
 - **Code and other tools** go through the CLI's daemon (`HTTPS_PROXY`), in a
   shell started after `passport login`. Call the real upstream host; the Proxy
   isn't a base URL.

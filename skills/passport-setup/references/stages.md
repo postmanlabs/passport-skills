@@ -130,9 +130,10 @@ Run `passport login`, wait for it to finish, then `passport-onboard cli check`.
 4. `passport-onboard demo verify`. Show the proof: HTTP status, the key the
    demo API received (`data.keyReceived`, masked) and its length (19), and
    `data.proxyRequestId`. Then say: **"Your request carried only
-   `{{vault:<id>}}`. The Proxy checked your Access Grant, fetched the real key
-   from the Secret Vault (HashiCorp) and sent it on. The sample API answered 200 because it
-   received the real key."**
+   `{{vault:<data.pointer>}}`, a pointer issued to you with your Access Grant.
+   The Proxy checked that grant, fetched the real key from the Secret Vault
+   (HashiCorp) and sent it on. The sample API answered 200 because it received
+   the real key."**
 
 ## 9. Walk through what was created — user
 
@@ -169,7 +170,7 @@ key."** Run `passport-onboard handson plan` for the values below.
    4. Endpoint: method `*`, host `<API host>`, path `/public/v1/*`, in that
       Resource Group, with an `Authorization` slot mapped to the Secret
       Reference `passport-api-key`. (The `Bearer ` prefix isn't set here; the
-      request carries it: `Authorization: Bearer {{vault:<id>}}`.)
+      request carries it: `Authorization: Bearer {{vault:<your pointer>}}`.)
    5. Access Request on that Resource Group for 90 days, the longest there is,
       because this grant is what keeps my access to the Passport API working.
       As the admin, yours is approved automatically.
