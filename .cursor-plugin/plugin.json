@@ -1,11 +1,11 @@
 {
   "name": "passport",
   "displayName": "Postman Passport",
-  "version": "0.3.5",
-  "description": "Step-by-step, agent-runnable skills for Postman Passport: set up and verify a proxy (locally in Docker, or on a single EC2 instance with CloudFront), then register APIs and manage credentials programmatically via the Passport public API.",
+  "version": "0.4.0",
+  "description": "Step-by-step, agent-runnable skills for Postman Passport: set up a Passport Proxy and HashiCorp Vault in Docker on your machine (macOS and Linux), prove it with a demo call, then register APIs and manage credentials through the Passport public API.",
   "author": { "name": "Postman" },
   "homepage": "https://github.com/postmanlabs/passport-skills",
   "repository": "https://github.com/postmanlabs/passport-skills",
   "license": "Apache-2.0",
-  "keywords": ["passport", "postman", "proxy", "aws", "docker", "vault"]
+  "keywords": ["passport", "postman", "proxy", "docker", "vault"]
 }

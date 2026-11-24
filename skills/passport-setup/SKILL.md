@@ -1,158 +1,115 @@
 ---
 name: passport-setup
-description: Set up and verify Postman Passport for one developer on their machine (local Docker) or for a team (AWS EC2 with CloudFront). Use when asked to set up Passport locally or for a team. Once a proxy is running, the companion passport-public-api skill registers APIs and manages credentials (secret references, bindings, access requests) through the Passport public API.
+description: >
+  Set up Postman Passport for one developer on their own machine (macOS or Linux): a Passport Proxy
+  and HashiCorp Vault in Docker, the Passport CLI signed in, a verified demo call, and a hands-on
+  round where the user stores a key in Vault and calls an API with only a pointer. Use when the user
+  says "set up passport", "setup passport", "run Passport locally", "install the Passport proxy",
+  or wants to stop putting API keys in .env files and doesn't have Passport running yet. Also use
+  to resume or check an earlier Passport setup on this machine. Once Passport is set up, the
+  passport-public-api skill registers APIs and credentials through the Passport public API.
 ---
 
-# Passport setup — instructions for AI coding agents
+# Passport setup
 
-This skill sets up and verifies a **Postman Passport proxy**, end to end. Everything it needs is in
-this folder (`guides/`, `scripts/`, `templates/`), whether it was installed as a plugin, installed as a
-skill, or run from a clone of the repo.
+You walk a developer through setting up Passport on their machine, from first
+introduction to a call they built themselves. `$SKILL_DIR` is this skill's
+folder; everything it needs is inside it.
 
-## Trigger
-When the user says **"setup passport"** (or similar: "set up the Passport proxy", "run Passport locally",
-"deploy Passport on AWS"):
+Read `references/concepts.md` before the first stage. The stage-by-stage copy
+is in `references/stages.md`; follow it in order.
 
-1. Before asking the user to choose, give this short introduction and ASCII
-   diagram. Keep the distinction between setup and the live API request:
+## Rules
 
-   Passport lets developers and AI agents call approved APIs without putting
-   the target API's key in their request or agent context. The key is stored
-   in a secret vault; the proxy retrieves it for an approved request. We will
-   set up the pieces, grant access to a demo API, and make a request that
-   proves the proxy fetched the key and used it. Then we can connect one of
-   your own APIs.
+1. **Secrets never go through the chat.** The user pastes them into the files
+   or the HashiCorp Vault UI the stages name. If a secret lands in the chat
+   anyway, tell the user to revoke it and make a new one.
+2. **Never read `~/.passport/passportrc`** (or `~/.passport-beta/passportrc`).
+   It holds live CLI tokens. Never print the contents of the files in
+   `~/.passport/onboarding/` or run `docker inspect` on the Proxy's env.
+3. **Never approve your own Access Request.** An admin's request for
+   themselves is approved by the service; anything else is the user's decision.
+4. **Never delete what you didn't make.** Not a Proxy Configuration (the user
+   deletes it in the app), not a Docker container without this skill's label,
+   not a Passport object. The script reuses objects by name and deletes none.
+5. **Show the plan before creating anything,** and install a tool only after
+   the user says yes. Commands that need `sudo`, and the Passport CLI
+   installer, the user runs in their own terminal.
+6. **What the user types is always a real tool:** the Passport app, the
+   HashiCorp Vault UI, their editor, `passport`, `docker`, an installer. Never
+   ask the user to run `passport-onboard`; it's yours.
+7. **Report what the script reports.** One line per check, failures included.
+   On an error, stop, show `error.hint`, look the code up in
+   `references/troubleshooting.md`, and don't retry silently.
+8. **Name stages by what they do** ("the Proxy stage"), never by number.
+9. **Use the glossary's capitalised terms** (Proxy, HashiCorp Vault, Secret
+   Reference, Namespace, Endpoint, Access Grant, Proxy Configuration) and say
+   "Passport Cloud", never "Postman Cloud".
 
-   - **Passport web app and control plane:** where you create a team, define
-     API access, and see setup progress. It is not in the API request path.
-   - **Passport Proxy (data plane):** runs near your vault, checks access,
-     replaces a secret reference with the real key, and forwards the request.
-   - **Secret Vault:** holds the real API key; this guide uses HashiCorp Vault.
-   - **Passport CLI:** signs you in and prepares the certificate your API
-     requests need to use the proxy.
+## The script
 
-   ```text
-   SETUP
-   Developer ----> [Passport web app / control plane]
-       |             team, API rules, access grants
-       +----------> [Passport CLI]  sign-in + client certificate
-   [Passport Proxy] ----registers----> [control plane]
+Run `"$SKILL_DIR/scripts/passport-onboard" <command>`. Every command prints one
+JSON object:
 
-   API REQUEST (control plane is outside this path)
-   Developer / agent --request + secret reference--> [Passport Proxy]
-                                                      |
-                                                      +--fetches key--> [Secret Vault]
-                                                      |
-                                                      +--approved request + key--> [Target API]
-   ```
+```json
+{"ok": true, "stage": "vault", "data": {}, "next": {"who": "user", "say": "…", "run": "…"}}
+{"ok": false, "stage": "proxy", "error": {"code": "key_rejected", "hint": "…"}}
+```
 
-   Explain that the proxy and Vault run in Docker on the developer's machine
-   for the one-developer path, or on an AWS instance for the team path. The
-   setup will install the CLI, start those components, configure a demo API,
-   and check a real request through the proxy.
+Exit code `0` = done, `2` = waiting on the user (relay `next.say` or
+`error.hint`, then wait), `3` = something earlier is missing (do what the hint
+says), `1` = an error. Turn `data` into plain sentences or a short table; never
+paste raw JSON at the user. State lives in `~/.passport/onboarding/state.json`.
 
-   Use the agent session's interactive multiple-choice question tool (Claude Code:
-   `AskUserQuestion`) to ask **"Who is this setup for?"** with these two options,
-   without preselecting or recommending either. Explain the tools needed for the
-   chosen path before installing them:
-   - **One developer** → follow `guides/local-docker.md`. Start with its team
-     step before installing or logging in to the CLI.
-   - **Team deployment on AWS** → follow `guides/aws-single-instance.md`
-2. Follow that guide **literally**. Do agent steps yourself and hand the
-   marked browser, token and secret-entry steps to the developer. The ground rules below apply to both
-   guides; each guide's agent section adds only what's specific to it. Paths like `guides/…` are
-   relative to this folder, and `$SKILL_DIR` in the guides means its absolute path (the folder
-   containing this `SKILL.md`).
+| Command | Does |
+|---|---|
+| `status` / `status --line` | OS check, what's done (checked against Docker and the CLI), the progress line |
+| `mark <stage>` | Records a stage the user finished: `welcome`, `setup-type`, `account`, `tour` |
+| `doctor` | Machine check, with an install command for anything missing |
+| `vault up` · `vault check <path>` | Starts HashiCorp Vault; checks a secret exists with the key `value` |
+| `proxy prepare` · `key check` · `proxy start` | The Proxy's keys and files; the API key and team; start and registration |
+| `cli check` | Is the Passport CLI signed in |
+| `demo plan` · `demo apply` · `demo verify` | The demo objects and the proof call |
+| `handson plan` · `check` · `verify` · `finish` | The values to create, the check of what the user made, the call, revoking the first key |
 
-Before creating catalog objects, read `guides/reference/concepts.md` for the
-Passport terms and dependency order. Keep that small, bundled glossary as the
-setup authority; public documentation is supplemental and may describe a
-different API version.
+## Stages
 
-## After setup: help the user see the value of Passport
-The person running this is usually **evaluating Passport, often as a potential customer**. A
-working proxy is the start, not the finish line. Once the e2e test passes, your job is to help
-them see, on their own APIs, what Passport does for them, and to help as much as you can.
+Start every stage message with the progress line (`status --line`). Ask
+choices with your menu tool (in Claude Code, `AskUserQuestion`: 2–4 options,
+header ≤ 12 characters), or a numbered list where there is none. End a stage
+with the docs link (`PASSPORT_DOCS_URL` in `references/urls.env`) for anyone
+who'd rather do it by hand.
 
-Everything after the e2e test is in **`guides/after-setup.md`** (shared by both setups):
+| Stage | Who | Script |
+|---|---|---|
+| Welcome | agent | `status`, then `references/welcome.md` as written |
+| Setup type | user | `mark setup-type` |
+| Machine check | agent; the user approves installs | `doctor` |
+| Account | user, in the browser | `mark account` |
+| Local Vault | agent | `vault up` |
+| Proxy | user fills two files, agent starts it | `proxy prepare`, `key check`, `proxy start` |
+| CLI sign-in | agent runs `passport login`, user approves | `cli check` |
+| Demo | agent, after the user OKs the plan | `demo plan`, `demo apply`, `demo verify` |
+| Tour | user, in the app | `mark tour` |
+| Hands-on | user builds, agent checks | `handson plan`, `check`, `verify`, `finish` |
 
-1. **Send the short handoff** (part 1): value first, one proof command, one next step.
-2. **For local setup, show the app's “See what was created” step**, then offer
-   to add their own API. The developer can have you create it or use the app's
-   guided flow. Follow their choice; check existing objects before creating
-   anything, so the two paths do not create duplicates. Never ask for the
-   secret value in chat. Give both `curl` forms when testing their API: with
-   explicit proxy/cert flags and, if verified, with the daemon environment.
-3. **Suggest next steps that fit what they told you:**
-   - their own script or SDK, via the daemon env vars;
-   - an AI agent calling an API without holding the key;
-   - more endpoints for a teammate;
-   - **ongoing API and access work** — use the **`passport-public-api`** skill
-     when they want the agent to register more APIs, manage secret references,
-     access requests, or credential bindings. It uses the selected app and API
-     destination. The first own-API walkthrough remains in
-     `guides/after-setup.md` part 2.
+Coming back later: `status` reports `resume: true`; follow "Coming back" in
+`references/stages.md`.
 
-Keep it concrete: use their real host, path and reference UUIDs, and say what each result proves
-in one plain sentence. Don't oversell: only claim what the step you ran just showed. Cleanup
-still waits until they say so.
+## What the skill leaves on the machine
 
-## Ground rules (apply to everything here)
-- **Use only this skill's files** (`guides/`, `scripts/`, `templates/`) as the source. If something is
-  missing, ask the user — don't search elsewhere.
-- **Discover before asking.** Check installed tools, profiles, regions, login state and existing resources
-  first; infer routine choices and state them; ask only for what's genuinely missing, in one go.
-- **Explain prerequisites before installation.** For the chosen setup, list each missing tool in
-  plain language: what it does here, where it will come from, and the exact install command.
-  Ask the developer to approve that list before installing anything or downloading Docker
-  images. Reuse tools and images already present.
-- **Ask before every AWS infrastructure change, naming every resource.** Show a table of exactly what will be created or
-  deleted (type, name, ID, account, region) plus the full commands, and get one yes per block. Read-only
-  commands run freely. A "yes"/"go ahead" approves that block: run it, verify it, report, all in that turn.
-- **Passport API and CLI calls are yours when the developer chooses the agent path.** Create and delete
-  namespaces, resource groups, references and endpoints, file access requests,
-  and run
-  `passport setup`/`whoami`/`request`/`daemon`/`ca status` yourself. In the local
-  setup, the developer creates the named proxy in the app and types its one-time
-  token in their own terminal; the proxy registers itself. The service may
-  auto-approve an admin's request for that same user. Check the approved
-  status and resulting grant; if it stays pending, the developer decides it
-  in the app. An agent never calls the approve endpoint for its own request.
-  Local API calls use the selected `/public/v1/` API with `PASSPORT_API_KEY`
-  during bootstrap, then a verified Vault reference through the proxy. Never
-  parse `passportrc` to obtain an access or refresh token on the local path.
-  If they choose the
-  app path for their own API, guide and verify instead of creating duplicates.
-  The AWS guide retains its existing agent-run registration flow.
-- **Create references for the right proxy.** Passport encrypts each new
-  reference for the default proxy in its zone. In the local flow, confirm the
-  named proxy is that zone's only proxy and is default; stop if it is not.
-  The AWS guide handles its existing default-proxy procedure separately.
-- **The human types into their own terminal.** You can't type into theirs and they can't type into yours.
-  For anything needing sudo, a password, a browser or a secret value: give the exact commands in a code
-  block, say what they should see, wait for "done", then verify it yourself. Show login links on their own
-  line, as a full `https://` URL with the confirmation code. Never ask for a secret's value in chat.
-- **Don't call it done early.** "An explicit curl works" is not "CLI and daemon fully configured"; report
-  each check separately (AWS step 8.4, "Success checklist").
-- **Never print or paste secrets:** registry keys (AWS path), private keys, proxy or Vault tokens, login tokens, API credentials.
-  Public keys, IDs and sha256s are fine; compare sha256s instead. Never print an API response that could
-  contain a secret, and never put a secret in user-data, a commit, or chat.
-- **Explain the bootstrap API key risk.** The developer creates it in the app
-  and starts the agent with `PASSPORT_API_KEY` set. This lets the agent use the
-  public API but also makes the key readable to the agent process and tools.
-  After a successful demo, guide a tested replacement key into local Vault,
-  verify it through the proxy, then have the developer revoke the bootstrap
-  key. Do not claim rotation succeeded until that request works.
-- **Never tear anything down** until the user explicitly says so.
-- **Check existing state first** and reuse it; record every resource you create so cleanup is exact.
-- **Long waits are not failures.** Some AWS waits take 3–15 minutes. If your command tool has a time
-  limit, give them a longer timeout or run them in the background, and re-run only the wait.
+- Docker: `passport-vault`, `passport-proxy`, network `passport-net`, volume
+  `passport-vault-data`, all labelled `com.postman.passport-onboarding`.
+- `~/.passport/onboarding/`: `state.json`; `proxy.env` (the Proxy's settings,
+  including the Vault token); `api-key.env` until the hands-on deletes it;
+  `keys/` (the Proxy's two private keys); `vault/` (HashiCorp Vault's unseal key
+  and root token, and its config).
+- The Passport CLI and its login in `~/.passport/`.
 
-## Layout (relative to this folder)
-- `guides/` — `local-docker.md`, `aws-single-instance.md`, and `after-setup.md` (shared by both)
-- `guides/reference/` — shared by both setups: `concepts.md` (the why: default-proxy rule, endpoints,
-  certificates, daemon), `troubleshooting.md`, `verification.md` (what has been tested, when)
-- `scripts/` — `preflight.sh` (read-only AWS checks + free name), `env.sh` (shared helpers), `aws-resources.sh`
-  (what exists / what cleanup would delete, tag-checked), `passport-api.js` (AWS API helper),
-  `local-api.sh` and `local-api.ps1` (local API helpers)
-- `templates/` — EC2 user-data, CloudFront files, and `operator-iam-policy.json` (the AWS permissions the guide needs)
+## Reference
+
+- `references/concepts.md`: glossary and invariants, shared with
+  passport-public-api.
+- `references/urls.env`: every URL, image and version this skill uses.
+- `references/troubleshooting.md`: error codes and symptoms.
+- `references/verification.md`: what has been tested, and when.

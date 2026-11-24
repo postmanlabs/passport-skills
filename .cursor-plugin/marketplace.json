@@ -2,13 +2,13 @@
   "name": "passport-skills",
   "owner": { "name": "Postman" },
   "metadata": {
-    "description": "Set up and verify a Postman Passport proxy (local Docker or a single AWS EC2 instance), and use the public API to register APIs and manage credentials."
+    "description": "Set up Postman Passport on your machine (local Docker, macOS and Linux), then register APIs and manage credentials through the public API."
   },
   "plugins": [
     {
       "name": "passport",
       "source": "./",
-      "description": "Set up and verify a Postman Passport proxy (local Docker, AWS single instance), then register APIs and manage credentials via the public API."
+      "description": "Set up Postman Passport on your machine (local Docker, macOS and Linux), then register APIs and manage credentials through the public API."
     }
   ]
 }
