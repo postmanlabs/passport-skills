@@ -17,7 +17,7 @@ VAULT_C=$P-vault PROXY_C=$P-proxy NET=$P-net VOL=$P-vault-data
 LABEL=com.postman.passport-onboarding
 STATE=$ONB/state.json
 API_BODY=$ONB/.api-body
-API_STATUS=000 PROXY_ERR='' PROXY_REQ=''
+API_STATUS=000 PROXY_ERR='' PROXY_REQ='' CLI_REAUTH=''
 SAMPLE_KEY=sdfdsfdsfsdfdfsdfds
 DEMO_NS=passport-proxy-local-e2e
 HANDSON_NS=passport-api
@@ -110,7 +110,10 @@ via_proxy() { # METHOD URL BODY HEADER
   raw=$(passport "${args[@]}" "$2" 2>&1) || true
   API_STATUS=$(printf '%s\n' "$raw" | head -1 | grep -oE '(^| )[1-5][0-9][0-9]( |$)' | head -1 | tr -d ' ')
   [ -n "$API_STATUS" ] || API_STATUS=000
+  CLI_REAUTH=''; case $raw in *WORKOS_REAUTH_REQUIRED*) CLI_REAUTH=1;; esac
   PROXY_ERR=$(printf '%s\n' "$raw" | sed -n 's/^[Xx]-[Pp]assport-[Pp]roxy-[Ee]rror:[[:space:]]*//p' | head -1 | tr -d '\r')
+  # No HTTP status = the CLI itself failed; keep its first error line for the hint.
+  [ "$API_STATUS" = 000 ] && [ -z "$PROXY_ERR" ] && PROXY_ERR="passport CLI: $(printf '%s\n' "$raw" | grep -m1 -iE 'error|code=|fail' | cut -c1-160 | tr -d '\r')"
   PROXY_REQ=$(printf '%s\n' "$raw" | sed -n 's/^[Xx]-[Pp]assport-[Pp]roxy-[Rr]equest-[Ii]d:[[:space:]]*//p' | head -1 | tr -d '\r')
   # shortcut: assumes --show-headers prints status + headers, a blank line, then the body (unverified).
   printf '%s\n' "$raw" | awk 'body { print } /^\r?$/ { body = 1 }' > "$API_BODY"
@@ -118,7 +121,10 @@ via_proxy() { # METHOD URL BODY HEADER
 }
 # The last call's status, also when api() ran inside $(…).
 api_status() { cat "$API_BODY.status" 2>/dev/null || echo 000; }
-api_err() { jq -r '[.code // .error.code // empty, .detail // .title // .error.message // .message // empty] | map(tostring) | join(": ")' "$API_BODY" 2>/dev/null; }
+api_err() {
+  [ "$(api_status)" = 000 ] && { echo "No reply from Passport Cloud; check the network or VPN."; return; }
+  jq -r '[.code // .error.code // empty, .detail // .title // .error.message // .message // empty] | map(tostring) | join(": ")' "$API_BODY" 2>/dev/null
+}
 # First id in a list whose item matches FILTER ($v = VALUE); follows nextCursor.
 find_id() { # PATH FILTER [VALUE]
   local sep='?' cursor='' id
@@ -264,7 +270,8 @@ vault_up() {
     [ -n "$status" ] && break
     sleep 1
   done
-  [ -n "$status" ] || die 1 vault_not_ready "HashiCorp Vault didn't answer within 60 s. Check: docker logs $VAULT_C"
+  # Our own container: stop it so its restart policy doesn't loop on a broken start.
+  [ -n "$status" ] || { docker stop "$VAULT_C" >/dev/null 2>&1; die 1 vault_not_ready "HashiCorp Vault didn't answer within 60 s; stopped it. Check: docker logs $VAULT_C"; }
   init=$(printf '%s' "$status" | jq -r .initialized)
   if [ "$init" != true ]; then
     init=$(docker exec "$VAULT_C" vault operator init -key-shares=1 -key-threshold=1 -format=json) || die 1 vault_init "vault operator init failed"
@@ -368,7 +375,7 @@ key_check() {
         fi
         emit "{\"teamId\":$(js "$team"),\"admin\":true,\"proxyListChecked\":true}"
       else
-        emit "{\"teamId\":$(js "$team"),\"admin\":true,\"proxyListChecked\":false,\"note\":\"GET /public/v1/proxies isn't available yet; check Proxy Configuration in the app instead\"}"
+        emit "{\"teamId\":$(js "$team"),\"admin\":true,\"proxyListChecked\":false,\"note\":$(js "Couldn't list Proxy Configurations (HTTP $API_STATUS); check Proxy Configuration in the app instead")}"
       fi;;
     401|403) die 2 key_rejected "Passport Cloud rejected the API key in $ONB/api-key.env ($API_STATUS). Paste a fresh key from $PASSPORT_APP_URL/me/api-keys.";;
     404) api GET /public/v1/namespaces
@@ -420,12 +427,10 @@ proxy_start() {
     esac
   fi
   mark_done proxy
+  local cloud=null
   api GET /public/v1/proxies
-  if [ "$API_STATUS" = 200 ]; then
-    emit "{\"container\":$(js "$PROXY_C"),\"registered\":true,\"proxyUrl\":$(js "$(env_get "$f" PASSPORT_PROXY_PUBLIC_URL)"),\"cloudStatus\":$(jq -c --arg id "$(env_get "$f" PASSPORT_PROXY_ID)" '[.data[]? | select(.id == $id) | .status][0] // null' "$API_BODY")}"
-  else
-    emit "{\"container\":$(js "$PROXY_C"),\"registered\":true,\"proxyUrl\":$(js "$(env_get "$f" PASSPORT_PROXY_PUBLIC_URL)"),\"cloudStatus\":null}"
-  fi
+  [ "$API_STATUS" = 200 ] && cloud=$(jq -c --arg id "$(env_get "$f" PASSPORT_PROXY_ID)" '[.data[]? | select(.id == $id) | .status][0] // null' "$API_BODY" 2>/dev/null) && [ -n "$cloud" ] || cloud=null
+  emit "{\"container\":$(js "$PROXY_C"),\"registered\":true,\"proxyUrl\":$(js "$(env_get "$f" PASSPORT_PROXY_PUBLIC_URL)"),\"cloudStatus\":$cloud}"
 }
 
 cmd_cli() {
@@ -477,9 +482,11 @@ demo_apply() {
   if [ -z "$gr" ]; then
     ar=$(create /public/v1/access-requests "$(jq -nc --arg ns "$ns" --arg ep "$ep" '{namespaceId:$ns,entities:[{type:"resource_endpoint",id:$ep}],message:"Passport onboarding demo",durationDays:7}')") || die 1 api_error "Creating the Access Request failed. $(api_err)"
     sset '.demo.ar = $v' "$ar"; add "Access Request" "$ar" false
-    st=$(jq -r '.data.status // empty' "$API_BODY")
+    st=$(jq -r '.data.status // empty' "$API_BODY" 2>/dev/null)
     if [ "$st" != approved ]; then
-      api GET "/public/v1/access-requests/$ar"; st=$(jq -r '.data.status // empty' "$API_BODY")
+      api GET "/public/v1/access-requests/$ar"
+      [ "$API_STATUS" = 200 ] || die 1 api_error "Reading the Access Request failed ($API_STATUS). $(api_err)"
+      st=$(jq -r '.data.status // empty' "$API_BODY" 2>/dev/null)
     fi
     [ "$st" = approved ] || { emit "{\"objects\":[$objs],\"accessRequest\":$(js "$st")}" user "The Access Request is $st. Approve it in the app: $PASSPORT_APP_URL/approval-requests" "passport-onboard demo apply"; exit 2; }
     for i in 1 2 3 4 5; do gr=$(active_grant "$ns" "$rg" "$ep"); [ -n "$gr" ] && break; sleep 2; done
@@ -494,6 +501,7 @@ demo_verify() {
   ref=$(sget .demo.ref); [ -n "$ref" ] || die 3 demo_first "Run: passport-onboard demo apply"
   passport refresh >/dev/null 2>&1 || die 1 refresh_failed "passport refresh failed. Is the CLI signed in? Run: passport login"
   via_proxy GET "https://$PASSPORT_DEMO_API_HOST/" "" "x-demo-api-key: {{vault:$ref}}"
+  [ -n "$CLI_REAUTH" ] && die 2 cli_signed_out "The Passport CLI's sign-in expired. Run: passport login"
   st=$(jq -r '.status // empty' "$API_BODY" 2>/dev/null); key=$(jq -r '.key // empty' "$API_BODY" 2>/dev/null); len=$(jq -r '.key_length // empty' "$API_BODY" 2>/dev/null)
   if [ "$st" = authenticated ] && [ "$len" = 19 ]; then
     mark_done demo
@@ -527,15 +535,20 @@ handson_check() {
   ns=$(find_id /public/v1/namespaces '.name == $v' "$HANDSON_NS") || die 1 api_error "Listing Namespaces failed ($(api_status)). $(api_err)"
   item "Namespace $HANDSON_NS" "$([ -n "$ns" ] && echo true || echo false)" "$ns"
   if [ -n "$ns" ]; then
-    rg=$(find_id "/public/v1/namespaces/$ns/resource-groups" 'true' "")
+    # An API failure must read as an error, not as "you haven't created it".
+    local fail="Checking the hands-on objects failed"
+    rg=$(find_id "/public/v1/namespaces/$ns/resource-groups" 'true' "") || die 1 api_error "$fail ($(api_status)). $(api_err)"
     item "Resource Group in $HANDSON_NS" "$([ -n "$rg" ] && echo true || echo false)" "$rg"
-    ref=$(find_id "/public/v1/namespaces/$ns/secret-references" '.name == $v' "$HANDSON_SECRET")
+    ref=$(find_id "/public/v1/namespaces/$ns/secret-references" '.name == $v' "$HANDSON_SECRET") || die 1 api_error "$fail ($(api_status)). $(api_err)"
     item "Secret Reference $HANDSON_SECRET" "$([ -n "$ref" ] && echo true || echo false)" "$ref"
-    ep=$(find_id "/public/v1/namespaces/$ns/endpoints" "(.method == \"*\") and .host == \$v and .path == \"/public/v1/*\" and ((.resourceGroupIds // []) | length > 0) and any(.secrets[]?; ((.label // \"\") | ascii_downcase) == \"authorization\" and .secretReferenceId == \"$ref\")" "$API_HOST")
+    ep=$(find_id "/public/v1/namespaces/$ns/endpoints" "(.method == \"*\") and .host == \$v and .path == \"/public/v1/*\" and ((.resourceGroupIds // []) | length > 0) and any(.secrets[]?; ((.label // \"\") | ascii_downcase) == \"authorization\" and .secretReferenceId == \"$ref\")" "$API_HOST") \
+      || die 1 api_error "$fail ($(api_status)). $(api_err)"
     item "Endpoint * $API_HOST/public/v1/* in a Resource Group, Authorization slot mapped to $HANDSON_SECRET" "$([ -n "$ep" ] && echo true || echo false)" "$ep"
     if [ -n "$ep" ]; then
-      api GET "/public/v1/endpoints/$ep"; rg=$(jq -r '.data.resourceGroupIds[0] // empty' "$API_BODY")
-      gr=$(active_grant "$ns" "$rg" "$ep")
+      api GET "/public/v1/endpoints/$ep"
+      [ "$API_STATUS" = 200 ] || die 1 api_error "$fail ($API_STATUS). $(api_err)"
+      rg=$(jq -r '.data.resourceGroupIds[0] // empty' "$API_BODY" 2>/dev/null)
+      gr=$(active_grant "$ns" "$rg" "$ep") || die 1 api_error "$fail ($(api_status)). $(api_err)"
     fi
     item "Active Access Grant covering that Endpoint" "$([ -n "$gr" ] && echo true || echo false)" "$gr"
   fi
@@ -549,6 +562,7 @@ handson_verify() {
   local ref; ref=$(sget .handson.ref); [ -n "$ref" ] || die 3 check_first "Run: passport-onboard handson check"
   passport refresh >/dev/null 2>&1 || die 1 refresh_failed "passport refresh failed. Is the CLI signed in? Run: passport login"
   via_proxy GET "$PASSPORT_API_URL/public/v1/namespaces" "" "Authorization: Bearer {{vault:$ref}}"
+  [ -n "$CLI_REAUTH" ] && die 2 cli_signed_out "The Passport CLI's sign-in expired. Run: passport login"
   if [ "$API_STATUS" = 200 ] && jq -e --arg n "$HANDSON_NS" '[.data[]?.name] | index($n)' "$API_BODY" >/dev/null 2>&1; then
     sset '.handson.verified = $v' true
     emit "{\"pass\":true,\"http\":200,\"namespaces\":$(jq -c '[.data[]?.name]' "$API_BODY"),\"proxyRequestId\":$(js "${PROXY_REQ:-}")}" user "Revoke the first API key in the app, then tell me" "passport-onboard handson finish"

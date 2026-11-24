@@ -29,7 +29,7 @@ marked as such; it isn't a test.
   restart policy doesn't retry forever.
 
 2026-11-24 · every `passport-onboard` branch against stand-ins for `docker`,
-`curl` and `passport` (38 cases, all passing on macOS bash 3.2 and on Debian
+`curl` and `passport` (44 cases, all passing on macOS bash 3.2 and on Debian
 bash 5.2 with GNU tools): `key check` for an admin, a member, a rejected key,
 a missing `/me` and another team's Proxy Configuration; `proxy start` for a
 registration, a reuse without recreating, a 401 token, a 409 key mismatch, a
@@ -38,7 +38,7 @@ paginated lists without writes, a pending Access Request and a 500;
 `demo verify` passing, receiving the unswapped pointer, and a Proxy refusal;
 `handson check` complete and incomplete, `verify` through the Secret
 Reference, `finish` with the first key still live and revoked; public API
-calls through the Proxy after the hands-on; `status` resuming, and noticing a
+calls through the Proxy after the hands-on; no network, an API error during the hands-on check, a non-JSON reply, and an expired CLI sign-in mid-call, each reported as a clear error; `status` resuming, and noticing a
 stopped Vault and a signed-out CLI.
 
 ## Not run yet

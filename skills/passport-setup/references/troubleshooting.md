@@ -30,10 +30,11 @@ don't retry silently. What has been tested is in `verification.md`.
 | `reference_key_mismatch` | Passport Cloud holds a different reference key for this Proxy (409) | See **Proxy keys lost**. |
 | `proxy_not_registered` | No registration within 60 s | Read `docker logs passport-proxy`; check the network can reach Passport Cloud. |
 | `refresh_failed` | `passport refresh` failed | `passport login` again. |
+| `cli_signed_out` | The CLI's sign-in expired mid-call (`WORKOS_REAUTH_REQUIRED`) | `passport login`, then rerun the step. |
 | `demo_first`, `check_first`, `verify_first` | A step ran out of order | Run the step the hint names. |
 | `grant_missing` | Approved, but the Access Grant isn't visible yet | Wait a minute; rerun `demo apply`. |
 | `demo_failed`, `handson_failed` | The call through the Proxy didn't pass | See **Calls through the Proxy**, using the HTTP status and proxy error in the hint. |
-| `api_error` | The public API returned an unexpected status | Show the status and its `code`; don't retry. |
+| `api_error` | The public API returned an unexpected status, or no reply at all (status `000`: network or VPN) | Show the status and its `code`; don't retry. |
 
 ## Calls through the Proxy
 
