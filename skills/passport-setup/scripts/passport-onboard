@@ -388,7 +388,7 @@ proxy_start() {
   need docker jq
   local f=$ONB/proxy.env sha i ports
   [ -s "$f" ] || die 3 prepare_first "Run: passport-onboard proxy prepare"
-  # PASSPORT_PROXY_ID isn't required: the Proxy learns its ID from the token, and the app doesn't show it yet.
+  [ -n "$(env_get "$f" PASSPORT_PROXY_ID)" ] || die 2 proxy_id_empty "PASSPORT_PROXY_ID in $f is still empty"
   [ -n "$(env_get "$f" PASSPORT_PROXY_TOKEN)" ] || die 2 proxy_token_empty "PASSPORT_PROXY_TOKEN in $f is still empty"
   [ -n "$(env_get "$f" PASSPORT_PROXY_ALLOWED_TEAM_IDS)" ] || die 3 team_unknown "Team ID not known yet. Run: passport-onboard key check"
   vault_ok || die 3 vault_down "HashiCorp Vault isn't running. Run: passport-onboard vault up"

@@ -23,7 +23,7 @@ don't retry silently. What has been tested is in `verification.md`.
 | `me_unavailable` | `GET /public/v1/me` isn't on this Passport Cloud yet, so the team ID can't be read | Stop at the Proxy stage and tell the user it's waiting on that API (dependencies list). Never read the team ID from `passportrc`. |
 | `other_proxy_configuration` | The team already has a Proxy Configuration that isn't the one in `proxy.env` | The user deletes it in the app. The skill never deletes it. |
 | `team_unknown` | `PASSPORT_PROXY_ALLOWED_TEAM_IDS` is blank | Run `key check` first. |
-| `proxy_token_empty` | `PASSPORT_PROXY_TOKEN` in `proxy.env` is blank | The user copies the token from the Proxy Configuration in the app and saves. |
+| `proxy_id_empty`, `proxy_token_empty` | `PASSPORT_PROXY_ID` or `PASSPORT_PROXY_TOKEN` in `proxy.env` is blank | The user copies both from the Proxy Configuration in the app and saves. |
 | `image_pull` | The Proxy image couldn't be downloaded | See **Proxy image**. |
 | `proxy_run` | `docker run` failed for the Proxy | Ports 8443/8081 (and 443/80 with the `.localhost` names) must be free: `doctor`. |
 | `registration_token_rejected` | Passport Cloud rejected the registration token (401) | The user regenerates the token on the Proxy Configuration page and pastes it into `proxy.env`; rerun `proxy start`. |
