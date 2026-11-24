@@ -107,7 +107,7 @@ start without either. Never regenerate `ref.pem`.
   Put `--` before the URL: `-H` takes every value up to the next option, so a
   URL right after a header would be read as another header.
 - **Other tools** go through the CLI's daemon (`HTTPS_PROXY=http://127.0.0.1:10144`),
-  which `passport login` sets up (unverified on beta; see `verification.md`). A
+  which `passport login` sets up (unverified; see `verification.md`). A
   shell started before that doesn't see the variables; open a new one.
 - **Node's built-in `fetch` ignores `HTTPS_PROXY`** unless run with
   `--use-env-proxy` or `NODE_USE_ENV_PROXY=1`; otherwise the literal

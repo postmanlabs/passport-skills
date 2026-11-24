@@ -72,7 +72,18 @@ Blocked by missing pieces (dependencies list): `key check` against a real
 `GET /public/v1/me`, a real Proxy registration (needs a public Proxy image and
 a real token), and everything after it against beta: `passport login` finding
 the Proxy, `demo apply/verify`, `handson check/verify/finish`, resume after a
-reboot. The Secret Vault (HashiCorp) and the Proxy on Linux Docker.
+reboot. The Secret Vault (HashiCorp) and the Proxy on Linux Docker. Nothing has
+been run against production yet.
+
+## Read in source, not run (production, 2026-11-24)
+
+- Proxy v0.13.0 is the first release that registers with a Proxy ID and
+  registration token. With `PASSPORT_CONTROL_PLANE_URL` unset it uses
+  `https://api.usepassport.ai`, so `proxy.env` leaves it out.
+- The Passport CLI from the production installer (0.9.5) signs in to
+  `app.usepassport.ai` and keeps its files in `~/.passport`; the beta build
+  uses `~/.passport-beta`.
+- The public API's `/openapi.json` lists the same routes as beta's.
 
 ## Read in source, not run (beta, 2026-11-24)
 
