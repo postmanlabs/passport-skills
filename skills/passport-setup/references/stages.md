@@ -66,18 +66,19 @@ Run `passport-onboard vault up`. Report the container, the Vault UI address
 
 1. Run `passport-onboard proxy prepare`. It makes the Proxy's two keys and two
    files the user fills in.
-2. The API key. Say: **"Create an API key in the Passport app under Account →
-   API keys (`<PASSPORT_APP_URL>/me/api-keys`), as a team admin. Paste it into
-   `~/.passport/onboarding/api-key.env` after `PASSPORT_API_KEY=` and save.
-   Don't paste it here."** Open the file for them (`open -t` on macOS,
-   `xdg-open` on Linux) and add: **"Keeping an API key in a file like this
-   isn't safe — any program running as you, including me, can read it. That's
-   the exact problem Passport solves. In the hands-on step you'll move a new key
-   into HashiCorp Vault and revoke this one."**
+2. The API key, as its own short message. Say: **"Create an API key in the
+   Passport app under Account → API keys (`<PASSPORT_APP_URL>/me/api-keys`).
+   Paste it into `~/.passport/onboarding/api-key.env` after
+   `PASSPORT_API_KEY=` and save. Don't paste it here."** Open the file for them
+   (`open -t` on macOS, `xdg-open` on Linux).
 3. When they say done: `passport-onboard key check`. On `not_admin`,
    `key_rejected` or `other_proxy_configuration`, show the hint and wait. On
    `me_unavailable`, stop: the team ID can't be read until
-   `GET /public/v1/me` ships (see `troubleshooting.md`).
+   `GET /public/v1/me` ships (see `troubleshooting.md`). When it passes, say:
+   **"Your key works. One thing to know: keeping an API key in a file like this
+   isn't safe — any program running as you, including me, can read it. That's
+   the exact problem Passport solves. In the hands-on step you'll move a new key
+   into HashiCorp Vault and revoke this one."**
 4. The Proxy Configuration. Say: **"In the Passport app, open Proxy
    Configuration and create one; pick any name. The app shows a one-time
    registration token: it proves this Proxy belongs to your team, which is why
@@ -88,7 +89,10 @@ Run `passport-onboard vault up`. Report the container, the Vault UI address
    configured."** Open the file for them.
 5. When they say done: `passport-onboard proxy start`. It waits up to 60 s for
    the Proxy to register. Report `data.proxyUrl`. If `data.cloudStatus` is
-   null, ask them to check the Proxy shows Healthy in the app.
+   null, ask them to check the Proxy shows Healthy in the app. Then say:
+   **"Your Proxy also has a console with its audit log at `<data.consoleUrl>`.
+   Sign in as `admin` with password `passport-local`; `proxy.env` says how to
+   change it."**
 
 ## 7. CLI sign-in — agent, the user approves in the browser
 
@@ -102,7 +106,8 @@ Run `passport login`, wait for it to finish, then `passport-onboard cli check`.
 ## 8. Demo — agent, plan shown first
 
 1. `passport-onboard demo plan`. Show the five objects as a table before
-   creating anything.
+   creating anything. The Access Request is for 7 days because the demo is
+   short-lived; say so in one line.
 2. Menu, header "Demo": **"Create these"** / **"Stop for now"**.
 3. `passport-onboard demo apply`. Show one line per object: type, ID, and
    whether it was created or already there. If the Access Request isn't
@@ -143,10 +148,12 @@ key."** Run `passport-onboard handson plan` for the values below.
    3. Secret Reference `passport-api-key`: vault type HashiCorp, path
       `passport-api-key`. It must exist before an Endpoint can send it.
    4. Endpoint: method `*`, host `<API host>`, path `/public/v1/*`, in that
-      Resource Group, with an `Authorization` slot sent as `Bearer ` followed by
-      the Secret Reference.
-   5. Access Request on that Resource Group for 90 days. As the admin, yours is
-      approved automatically.
+      Resource Group, with an `Authorization` slot mapped to the Secret
+      Reference `passport-api-key`. (The `Bearer ` prefix isn't set here; the
+      request carries it: `Authorization: Bearer {{vault:<id>}}`.)
+   5. Access Request on that Resource Group for 90 days, the longest there is,
+      because this grant is what keeps my access to the Passport API working.
+      As the admin, yours is approved automatically.
 3. When they say done: `passport-onboard handson check`. Show each item as
    found or missing; repeat until `data.complete`.
 4. `passport-onboard handson verify`: a call to the public API through the

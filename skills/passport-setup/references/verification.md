@@ -27,6 +27,9 @@ marked as such; it isn't a test.
   Cloud, and is refused with 401. The script reports
   `registration_token_rejected` in about 7 s and stops the container so its
   restart policy doesn't retry forever.
+- Proxy console on the same image (run without registration): `/console`
+  answers 200; `/auth/login` accepts `admin` / `passport-local` from
+  `proxy.env` (200) and refuses a wrong password (401).
 
 2026-11-24 · every `passport-onboard` branch against stand-ins for `docker`,
 `curl` and `passport` (44 cases, all passing on macOS bash 3.2 and on Debian

@@ -231,9 +231,9 @@ cmd_doctor() {
     if port_busy "$t" && ! running "$PROXY_C"; then row "port $t" "The Proxy listens here" in-use "Stop whatever uses 127.0.0.1:$t, then check again"; fi
   done
   if { running "$PROXY_C" || { ! port_busy 443 && ! port_busy 80; }; } && resolves passport-proxy.localhost && resolves passport-management.localhost; then
-    row "Proxy address" "How your tools reach the Proxy" info "https://passport-proxy.localhost"
+    row "Proxy address" "Your Proxy will be at https://passport-proxy.localhost" info
   else
-    row "Proxy address" "How your tools reach the Proxy" info "https://localhost:8443 (ports 443/80 are busy or *.localhost names don't resolve)"
+    row "Proxy address" "Your Proxy will be at https://localhost:8443" info
   fi
   t=$(curl -s -m 15 -o /dev/null -w '%{http_code}' "$PASSPORT_API_URL/llms.txt" 2>/dev/null)
   if [ "$t" = 200 ]; then row "Passport Cloud" "Holds your rules" ok
@@ -342,6 +342,9 @@ proxy_prepare() {
   env_set "$ONB/proxy.env" PASSPORT_PROXY_JWKS_URL "$PASSPORT_JWKS_URL"
   env_set "$ONB/proxy.env" VAULT_ADDR "http://$VAULT_C:8200"
   env_set "$ONB/proxy.env" VAULT_TOKEN "$(cat "$ONB/vault/root-token")"
+  # Console sign-in (older proxy.env files lack it); never overwrite a value the user set.
+  grep -q '^PASSPORT_PROXY_CONSOLE_USER=' "$ONB/proxy.env" || env_set "$ONB/proxy.env" PASSPORT_PROXY_CONSOLE_USER admin
+  grep -q '^PASSPORT_PROXY_CONSOLE_PASSWORD_HASH=' "$ONB/proxy.env" || env_set "$ONB/proxy.env" PASSPORT_PROXY_CONSOLE_PASSWORD_HASH "$(sed -n 's/^PASSPORT_PROXY_CONSOLE_PASSWORD_HASH=//p' "$SKILL_DIR/templates/proxy.env.tmpl")"
   [ -n "$(sget .teamId)" ] && env_set "$ONB/proxy.env" PASSPORT_PROXY_ALLOWED_TEAM_IDS "$(sget .teamId)"
   emit "{\"apiKeyFile\":$(js "$ONB/api-key.env"),\"proxyEnvFile\":$(js "$ONB/proxy.env"),\"proxyUrl\":$(js "$PUB_URL"),\"apiKeyFilled\":$([ -n "$(env_get "$ONB/api-key.env" PASSPORT_API_KEY)" ] && echo true || echo false),\"proxyIdFilled\":$([ -n "$(env_get "$ONB/proxy.env" PASSPORT_PROXY_ID)" ] && echo true || echo false),\"proxyTokenFilled\":$([ -n "$(env_get "$ONB/proxy.env" PASSPORT_PROXY_TOKEN)" ] && echo true || echo false)}"
 }
@@ -430,7 +433,7 @@ proxy_start() {
   local cloud=null
   api GET /public/v1/proxies
   [ "$API_STATUS" = 200 ] && cloud=$(jq -c --arg id "$(env_get "$f" PASSPORT_PROXY_ID)" '[.data[]? | select(.id == $id) | .status][0] // null' "$API_BODY" 2>/dev/null) && [ -n "$cloud" ] || cloud=null
-  emit "{\"container\":$(js "$PROXY_C"),\"registered\":true,\"proxyUrl\":$(js "$(env_get "$f" PASSPORT_PROXY_PUBLIC_URL)"),\"cloudStatus\":$cloud}"
+  emit "{\"container\":$(js "$PROXY_C"),\"registered\":true,\"proxyUrl\":$(js "$(env_get "$f" PASSPORT_PROXY_PUBLIC_URL)"),\"consoleUrl\":$(js "$(env_get "$f" PASSPORT_PROXY_PUBLIC_MANAGEMENT_URL)/console"),\"consoleUser\":$(js "$(env_get "$f" PASSPORT_PROXY_CONSOLE_USER)"),\"cloudStatus\":$cloud}"
 }
 
 cmd_cli() {
@@ -519,7 +522,7 @@ cmd_handson() {
       {\"type\":\"Namespace\",\"name\":\"$HANDSON_NS\"},
       {\"type\":\"Resource Group\",\"name\":\"$API_HOST\"},
       {\"type\":\"Secret Reference\",\"name\":\"$HANDSON_SECRET\",\"vaultType\":\"hashicorp\",\"vaultPath\":\"$HANDSON_SECRET\"},
-      {\"type\":\"Endpoint\",\"method\":\"*\",\"host\":\"$API_HOST\",\"path\":\"/public/v1/*\",\"slot\":\"Authorization\",\"slotValue\":\"Bearer + the Secret Reference\"},
+      {\"type\":\"Endpoint\",\"method\":\"*\",\"host\":\"$API_HOST\",\"path\":\"/public/v1/*\",\"slot\":\"Authorization\",\"slotSecretReference\":\"$HANDSON_SECRET\",\"requestHeader\":\"Authorization: Bearer {{vault:<Secret Reference ID>}}\"},
       {\"type\":\"Access Request\",\"on\":\"the Resource Group\",\"durationDays\":90}]}";;
     check) handson_check;;
     verify) handson_verify;;
