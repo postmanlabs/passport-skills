@@ -26,9 +26,11 @@ don't retry silently. What has been tested is in `verification.md`.
 | `proxy_id_empty`, `proxy_token_empty` | `PASSPORT_PROXY_ID` or `PASSPORT_PROXY_TOKEN` in `proxy.env` is blank | The user copies both from the Proxy Configuration in the app and saves. |
 | `image_pull` | The Proxy image couldn't be downloaded | See **Proxy image**. |
 | `proxy_run` | `docker run` failed for the Proxy | Ports 8443/8081 (and 443/80 with the `.localhost` names) must be free: `doctor`. |
-| `registration_token_rejected` | Passport Cloud rejected the registration token (401) | The user regenerates the token on the Proxy Configuration page and pastes it into `proxy.env`; rerun `proxy start`. |
-| `reference_key_mismatch` | Passport Cloud holds a different reference key for this Proxy (409) | See **Proxy keys lost**. |
-| `proxy_not_registered` | No registration within 60 s | Read `docker logs passport-proxy`; check the network can reach Passport Cloud. |
+| `proxy_crashed` | The Proxy exited or keeps restarting; the script stopped it | Read `error.logs`: the Proxy names the setting or key at fault. Fix it, then rerun `proxy start`. Keys that don't match what Passport Cloud holds: **Proxy keys lost**. |
+| `proxy_not_found` | No Proxy Configuration in the team has the `PASSPORT_PROXY_ID` in `proxy.env` | The user copies the Proxy ID again from the app. |
+| `proxy_setup_expired` | The registration token expired or was revoked before the Proxy registered | The user makes a new token on the Proxy Configuration page and pastes it into `proxy.env`; rerun `proxy start`. |
+| `proxy_disabled` | The Proxy Configuration is disabled in the app | The user enables it, then rerun `proxy start`. |
+| `proxy_not_healthy` | After 90 s Passport Cloud still reports `not_connected` (never registered) or `unreachable` (no heartbeat for 3 minutes); the Proxy keeps retrying | Read `error.logs` for the reason (token refused, wrong Proxy ID, clock, network). Fix it, then rerun `proxy start`. |
 | `refresh_failed` | `passport refresh` failed | `passport login` again. |
 | `cli_signed_out` | The CLI's sign-in expired mid-call (`WORKOS_REAUTH_REQUIRED`) | `passport login`, then rerun the step. |
 | `demo_first`, `check_first`, `verify_first` | A step ran out of order | Run the step the hint names. |
@@ -82,7 +84,7 @@ secret again in the Secret Vault (HashiCorp) UI. References keep working: they p
 | Docker isn't running | The user starts Docker Desktop, OrbStack or Colima. |
 | A container stopped | `vault up` / `proxy start` start it again. |
 | Secret Vault (HashiCorp) locked | It unlocks itself at start; if not, `vault up` unlocks it. |
-| Registration token rejected | `registration_token_rejected` above. |
+| Proxy not Healthy | `proxy start` again, then follow its error code above. |
 | CLI signed out | `passport login`. |
 | The API key's team differs from the one recorded | Ask which team to continue with; a different team starts again from the sign-in step. |
 | `~/.passport/onboarding/` deleted | **Proxy keys lost**: explain and stop. |

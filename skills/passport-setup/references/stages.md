@@ -90,9 +90,13 @@ Run `passport-onboard vault up`. Report the container, the Secret Vault (HashiCo
    `PASSPORT_PROXY_ID=` and `PASSPORT_PROXY_TOKEN=`. Everything else in that
    file is already filled in; read it to see how your Proxy is configured."**
    Open the file for them.
-5. When they say done: `passport-onboard proxy start`. It waits up to 60 s for
-   the Proxy to register. Report `data.proxyUrl`. If `data.cloudStatus` is
-   null, ask them to check the Proxy shows Healthy in the app. Then say:
+5. When they say done: `passport-onboard proxy start`. It waits up to 90 s for
+   Passport Cloud to report the Proxy Healthy. Report `data.proxyUrl`. If
+   `data.cloudStatus` is null, Passport Cloud couldn't be asked: read
+   `data.logs`, say in one line whether the Proxy looks registered, and ask
+   them to check it shows Healthy in the app. On an error that has
+   `error.logs`, read them and tell the user in one or two lines what the
+   Proxy says is wrong and what to change; never paste the logs. Then say:
    **"Your Proxy also has a console at `<data.consoleUrl>`. Its audit log lists
    every request the Proxy allowed or refused; the Proxy writes it to
    `~/.passport/onboarding/audit/audit.jsonl`. Sign in with:**

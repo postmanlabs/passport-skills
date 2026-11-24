@@ -35,8 +35,9 @@ emit() { # data-json [who say run]
   [ $# -ge 2 ] && printf ',"next":{"who":%s,"say":%s,"run":%s}' "$(js "$2")" "$(js "${3:-}")" "$(js "${4:-}")"
   printf '}\n'
 }
-die() { # exit-code code hint
-  printf '{"ok":false,"stage":%s,"error":{"code":%s,"hint":%s}}\n' "$(js "$STAGE")" "$(js "$2")" "$(js "$3")"
+die() { # exit-code code hint [logs]
+  local extra=; [ $# -ge 4 ] && extra=",\"logs\":$(js "$4")"
+  printf '{"ok":false,"stage":%s,"error":{"code":%s,"hint":%s%s}}\n' "$(js "$STAGE")" "$(js "$2")" "$(js "$3")" "$extra"
   exit "$1"
 }
 need() { local t; for t in "$@"; do command -v "$t" >/dev/null 2>&1 || die 3 missing_tool "$t is not installed. Run: passport-onboard doctor"; done; }
@@ -81,7 +82,12 @@ exists() { docker inspect "$1" >/dev/null 2>&1; }
 running() { [ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null)" = true ]; }
 vexec() { VAULT_TOKEN=$(cat "$ONB/vault/root-token" 2>/dev/null) docker exec -e VAULT_TOKEN "$VAULT_C" vault "$@"; }
 vault_ok() { running "$VAULT_C" && docker exec "$VAULT_C" vault status >/dev/null 2>&1; }
-proxy_ok() { running "$PROXY_C" && docker logs "$PROXY_C" 2>&1 | grep -q 'registered with control plane'; }
+proxy_ok() { running "$PROXY_C"; }   # registration itself is checked with Passport Cloud in proxy start
+restarts() { docker inspect -f '{{.RestartCount}}' "$1" 2>/dev/null || echo 0; }
+redact() { # log lines for the agent: secret-looking values hidden, control characters dropped so the JSON stays valid
+  tr -d '\000-\010\013-\037' | sed -E -e 's/([Bb]earer )[^[:space:]",]+/\1[hidden]/g' \
+    -e 's/(([Tt]oken|TOKEN|[Ss]ecret|SECRET|[Pp]assword|PASSWORD|[Aa]pi_?[Kk]ey|API_KEY)[^=:]{0,20}[=:][[:space:]]*"?)[^[:space:]",]+/\1[hidden]/g'
+}
 vault_ui() { local hp; hp=$(docker port "$VAULT_C" 8200/tcp 2>/dev/null | head -1); [ -n "$hp" ] && echo "http://127.0.0.1:${hp##*:}/ui"; }
 
 # ---------- public API ----------
@@ -416,26 +422,36 @@ proxy_start() {
       -v "$ONB/keys:/keys:ro" -v "$ONB/audit:/audit" --env-file "$f" "$PASSPORT_PROXY_IMAGE" >/dev/null 2>&1 \
       || die 1 proxy_run "docker run failed for the Proxy. Check ports 8443/8081 (and 443/80) are free."
   fi
-  for i in $(seq 1 60); do
-    proxy_ok && break
-    running "$PROXY_C" || break
-    docker logs "$PROXY_C" 2>&1 | grep -q 'startup failed' && break   # fatal; the restart policy would loop
-    sleep 1
+  # Proof of registration is Passport Cloud's status for this Proxy ID, never a log line: log
+  # wording changes with the Proxy. The logs go back to the agent to read when it isn't healthy.
+  local pid r0 cloud=null logs
+  pid=$(env_get "$f" PASSPORT_PROXY_ID); r0=$(restarts "$PROXY_C")
+  for i in $(seq 1 18); do   # about 90 s: enrollment, then the first heartbeat
+    { running "$PROXY_C" && [ "$(restarts "$PROXY_C")" = "$r0" ]; } || break   # exited, or the restart policy is looping
+    api GET /public/v1/proxies
+    if [ "$API_STATUS" = 200 ]; then
+      cloud=$(jq -c --arg id "$pid" '[.data[]? | select(.id == $id) | .status][0] // null' "$API_BODY" 2>/dev/null) || cloud=null
+      [ "$cloud" = '"healthy"' ] && break
+    else
+      cloud=unknown; [ "$i" -ge 6 ] && break   # can't ask Passport Cloud: give the Proxy 30 s, then hand over the logs
+    fi
+    sleep 5
   done
-  if ! proxy_ok; then
-    local logs; logs=$(docker logs --tail 40 "$PROXY_C" 2>&1)
+  logs=$(docker logs --tail 30 "$PROXY_C" 2>&1 | redact)
+  if ! running "$PROXY_C" || [ "$(restarts "$PROXY_C")" != "$r0" ]; then
     docker stop "$PROXY_C" >/dev/null 2>&1   # our own container: stop the restart loop until the fix is in
-    case $logs in
-      *"KEK mismatch"*) die 1 reference_key_mismatch "Passport Cloud has a different reference key for this Proxy (409). See troubleshooting.md, 'Proxy keys lost'.";;
-      *"rejected PASSPORT_PROXY_TOKEN"*) die 2 registration_token_rejected "The registration token was rejected (401). Copy a fresh token from the Proxy Configuration page into PASSPORT_PROXY_TOKEN in $f.";;
-      *) die 1 proxy_not_registered "The Proxy didn't register within 60 s. Last log lines: $(printf '%s' "$logs" | tail -5 | grep -viE 'token|secret|key=' | tr '\n' ' ')";;
-    esac
+    die 1 proxy_crashed "The Proxy stopped or keeps restarting. Its last log lines are in error.logs." "$logs"
   fi
+  case $cloud in
+    '"healthy"'|unknown) ;;
+    null) die 2 proxy_not_found "Passport Cloud has no Proxy Configuration with the PASSPORT_PROXY_ID in $f. Copy the ID again from the app." "$logs";;
+    '"setup_expired"') die 2 proxy_setup_expired "The registration token expired or was revoked. Create a new one on the Proxy Configuration page and paste it into PASSPORT_PROXY_TOKEN in $f." "$logs";;
+    '"disabled"') die 2 proxy_disabled "This Proxy Configuration is disabled in the app. Enable it, then rerun." "$logs";;
+    *) die 2 proxy_not_healthy "Passport Cloud reports the Proxy as $cloud after 90 s. Its last log lines are in error.logs." "$logs";;
+  esac
   mark_done proxy
-  local cloud=null
-  api GET /public/v1/proxies
-  [ "$API_STATUS" = 200 ] && cloud=$(jq -c --arg id "$(env_get "$f" PASSPORT_PROXY_ID)" '[.data[]? | select(.id == $id) | .status][0] // null' "$API_BODY" 2>/dev/null) && [ -n "$cloud" ] || cloud=null
-  emit "{\"container\":$(js "$PROXY_C"),\"registered\":true,\"proxyUrl\":$(js "$(env_get "$f" PASSPORT_PROXY_PUBLIC_URL)"),\"consoleUrl\":$(js "$(env_get "$f" PASSPORT_PROXY_PUBLIC_MANAGEMENT_URL)/console"),\"consoleUser\":$(js "$(env_get "$f" PASSPORT_PROXY_CONSOLE_USER)"),\"cloudStatus\":$cloud}"
+  [ "$cloud" = unknown ] && cloud=null
+  emit "{\"container\":$(js "$PROXY_C"),\"registered\":$([ "$cloud" = '"healthy"' ] && echo true || echo null),\"proxyUrl\":$(js "$(env_get "$f" PASSPORT_PROXY_PUBLIC_URL)"),\"consoleUrl\":$(js "$(env_get "$f" PASSPORT_PROXY_PUBLIC_MANAGEMENT_URL)/console"),\"consoleUser\":$(js "$(env_get "$f" PASSPORT_PROXY_CONSOLE_USER)"),\"cloudStatus\":$cloud$([ "$cloud" = null ] && printf ',"logs":%s' "$(js "$logs")")}"
 }
 
 cmd_cli() {
