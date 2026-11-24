@@ -22,7 +22,7 @@ marked as such; it isn't a test.
 - `proxy start`: stops with `image_pull` because the Proxy image tag
   `onboarding-beta` isn't published yet (404).
 - `proxy start` with a Proxy image built locally from the beta source and a
-  fake registration token: the Proxy starts as the host user, reads its keys
+  fake enrollment token: the Proxy starts as the host user, reads its keys
   from the read-only mount and its settings from `proxy.env`, reaches Passport
   Cloud, and is refused with 401. The script reports the refusal in about 7 s
   and stops the container so its restart policy doesn't retry forever.

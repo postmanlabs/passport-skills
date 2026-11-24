@@ -28,7 +28,7 @@ don't retry silently. What has been tested is in `verification.md`.
 | `proxy_run` | `docker run` failed for the Proxy | Ports 8443/8081 (and 443/80 with the `.localhost` names) must be free: `doctor`. |
 | `proxy_crashed` | The Proxy exited or keeps restarting; the script stopped it | Read `error.logs`: the Proxy names the setting or key at fault. Fix it, then rerun `proxy start`. Keys that don't match what Passport Cloud holds: **Proxy keys lost**. |
 | `proxy_not_found` | No Proxy Configuration in the team has the `PASSPORT_PROXY_ID` in `proxy.env` | The user copies the Proxy ID again from the app. |
-| `proxy_setup_expired` | The registration token expired or was revoked before the Proxy registered | The user makes a new token on the Proxy Configuration page and pastes it into `proxy.env`; rerun `proxy start`. |
+| `proxy_setup_expired` | The enrollment token expired or was revoked before the Proxy registered | The user makes a new token on the Proxy Configuration page (`<app>/access-proxies`) and pastes it into `proxy.env`; rerun `proxy start`. |
 | `proxy_disabled` | The Proxy Configuration is disabled in the app | The user enables it, then rerun `proxy start`. |
 | `proxy_not_healthy` | After 90 s Passport Cloud still reports `not_connected` (never registered) or `unreachable` (no heartbeat for 3 minutes); the Proxy keeps retrying | Read `error.logs` for the reason (token refused, wrong Proxy ID, clock, network). Fix it, then rerun `proxy start`. |
 | `refresh_failed` | `passport refresh` failed | `passport login` again. |

@@ -13,7 +13,7 @@ they live only in this table.
 |---|---|---|---|
 | Passport Cloud | The hosted Passport Control Plane. Holds the rules (who may use which secret, on which API, for which operation) and never sees a secret value. | — | `api_url` |
 | Proxy | The data plane, in your network next to the Secret Vault (for one developer, in Docker on their machine). Checks each request against your Access Grants, swaps `{{vault:<pointer>}}` for the real value on the way out, and writes an audit log. | — | — |
-| Proxy Configuration | The app's record of your Proxy. It gives the Proxy ID and registration token the Proxy uses to register itself, and shows whether the Proxy is healthy. One per zone. | Proxy Configuration | `GET /public/v1/proxies` |
+| Proxy Configuration | The app's record of your Proxy. It gives the Proxy ID and enrollment token the Proxy uses to register itself, and shows whether the Proxy is healthy. One per zone. | Proxy Configuration | `GET /public/v1/proxies` |
 | Secret Vault | Holds the real secret values, next to the Proxy. The Proxy reads HashiCorp Vault, AWS Secrets Manager or Google Secret Manager. This setup runs HashiCorp Vault in Docker: call it Secret Vault (HashiCorp), never "HashiCorp Vault" alone, so it doesn't read as the only vault. | Vault type | `vaultType` |
 | Secret | A value in the Secret Vault at a path, stored as JSON key-value pairs. Passport reads the key `value`. | — | — |
 | Secret Reference | Where a secret lives: a vault type and a path in the Secret Vault. Endpoint slots map to it; requests never name it. | Secret references | `secret-references` |
