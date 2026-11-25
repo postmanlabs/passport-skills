@@ -110,7 +110,9 @@ Run `passport-onboard vault up`. Report the container, the Secret Vault (HashiCo
    Proxy says is wrong and what to change; never paste the logs. Then say:
    **"Your Proxy also has a console at `<data.consoleUrl>`. Its audit log lists
    every request the Proxy allowed or refused; the Proxy writes it to
-   `~/.passport/onboarding/audit/audit.jsonl`. Sign in with:**
+   `~/.passport/onboarding/audit/audit.jsonl`. It's empty until your first
+   request; I'll show you that request there after the sample API call. Sign
+   in with:**
 
    ```text
    Username: admin
@@ -149,12 +151,28 @@ Run `passport login`, wait for it to finish, then `passport-onboard cli check`.
    it was created or already there, and its *What it is* line from step 1. If the Access Request isn't
    approved, show the hint and wait; never approve it yourself.
 4. `passport-onboard demo verify`. Show the proof: HTTP status, the key the
-   demo API received (`data.keyReceived`, masked) and its length (19), and
-   `data.proxyRequestId`. Then say: **"Your request carried only
-   `{{vault:<data.pointer>}}`, a pointer issued to you with your Access Grant.
-   The Proxy checked that grant, fetched the real key from the Secret Vault
-   (HashiCorp) and sent it on. The sample API answered 200 because it received
-   the real key."**
+   demo API received (`data.keyReceived`, masked) and its length (19). Then
+   say: **"Your request carried only `{{vault:<data.pointer>}}`, a pointer
+   issued to you with your Access Grant. The Proxy checked that grant, fetched
+   the real key from the Secret Vault (HashiCorp) and sent it on. The sample
+   API answered 200 because it received the real key."**
+5. Show that call in the Proxy console. Open `<data.console.url>` for them
+   (`open` on macOS, `xdg-open` on Linux), then say: **"Now see the same call
+   from the Proxy's side. Sign in to the console (`admin` / `passport-local`)
+   and open *Activity*. The top row is `GET <PASSPORT_DEMO_API_HOST>/`. Click
+   it:**
+
+   - ***Resolved refs* is `<data.pointer>`, the pointer your request carried.
+     The Proxy swapped it for the key; the key itself is nowhere in the log.**
+   - ***Outcome* and *Origin status* show 200: the Proxy allowed the call, and
+     the sample API accepted the key.**
+   - ***User* is you, from your client certificate.**
+   - ***Request ID* `<data.console.event.requestId>` is this request's entry in
+     the audit log."**
+
+   If `data.console.event` is null, the Proxy hasn't written the entry yet:
+   leave out the *Request ID* line and tell them to reload the page in a few
+   seconds. Menu, header "Console": **"Continue"** / **"Stop for now"**.
 
 ## 9. Walk through what was created — user
 
@@ -214,6 +232,15 @@ key."** Run `passport-onboard handson plan` for the values below.
    part to fix: no secret at that path, or no key named `value`.
 4. `passport-onboard handson verify`: a call to the public API through the
    Proxy using only the Secret Reference. Show the namespaces it returned.
+5. Open `<data.console.url>` again, then say: **"In the console's *Activity*,
+   the top row is that call: `GET <API host>/public/v1/namespaces`. Click it.
+   *Resolved refs* is `<data.pointer>`, your pointer for `passport-api-key`;
+   *Outcome* and *Origin status* show 200, Passport's answer to the key the
+   Proxy sent. The key you stored is in the Secret Vault (HashiCorp) only;
+   the log, like your request, has just the pointer."** If
+   `data.console.event` has a `requestId`, add: **"Its *Request ID* is
+   `<data.console.event.requestId>`."** If `data.console.event` is null, tell
+   them to reload the page in a few seconds.
 
 ## 11. Revoke the setup key — user, the agent checks
 

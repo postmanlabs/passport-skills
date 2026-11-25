@@ -49,8 +49,8 @@ escapes the path (`url.PathEscape`), so it asks for
 `secret/data/passport%2Fapi-key`; the Secret Vault (HashiCorp) answers that
 with the secret.
 
-2026-11-24 · every `passport-onboard` branch against stand-ins for `docker`,
-`curl` and `passport` (56 cases, passing on macOS bash 3.2; an earlier 45-case
+2026-11-25 · every `passport-onboard` branch against stand-ins for `docker`,
+`curl` and `passport` (57 cases, passing on macOS bash 3.2; an earlier 45-case
 version also passed on Debian bash 5.2 with GNU tools). The `passport`
 stand-in parses `-H` the way the real CLI does. `key check` for an admin, a
 member, a rejected key, a missing `/me` and another team's Proxy Configuration;
@@ -59,10 +59,12 @@ recreating, `not_connected`, `setup_expired`, `disabled`, an unknown Proxy ID,
 a crash, a restart loop, Passport Cloud unreachable (log lines handed over with
 secrets hidden) and a failed download; `demo apply` creating, reusing across
 paginated lists without writes, a pending Access Request and a 500;
-`demo verify` passing with the pointer from the certificate, no pointer yet,
+`demo verify` passing with the pointer from the certificate and finding that
+request's entry in the Proxy's audit file (lines in the format Proxy v0.13.0's
+file sink writes), passing before the entry is written, no pointer yet,
 receiving the unswapped pointer, and a Proxy refusal; `handson plan`'s link to the
 Secret Vault (HashiCorp) form; `handson check` complete
-and incomplete, `verify` with the user's pointer, `finish` with the first key
+and incomplete, `verify` with the user's pointer and its audit entry, `finish` with the first key
 still live and revoked; public API calls through the Proxy after the hands-on;
 no network, an API error during the hands-on check, a non-JSON reply, and an
 expired CLI sign-in mid-call, each reported as a clear error; `status`
@@ -87,9 +89,23 @@ through the Proxy unchanged.
 
 With Proxy v0.13.0: a real registration and everything after it, against
 beta: `passport login` finding the Proxy, `demo apply/verify`,
-`handson check/verify/finish`, resume after a reboot. The Secret Vault
-(HashiCorp) and the Proxy on Linux Docker. Nothing has been run against
-production yet.
+`handson check/verify/finish`, the console showing those requests, resume
+after a reboot. The Secret Vault (HashiCorp) and the Proxy on Linux Docker.
+Nothing has been run against production yet.
+
+## Read in source, not run (Proxy v0.13.0 audit log, 2026-11-25)
+
+- For each request, the Proxy records the time, a request ID, the user ID and
+  email from the client certificate, the host, method and path, the pointers
+  it resolved (never a value), missing, unauthorized and passed-through
+  pointers, the upstream status, the duration and the outcome. The file sink
+  appends this as one OTLP JSON line after the Proxy has replied.
+- The console's *Activity* tab lists these newest first, over the last 15
+  minutes by default. A row opens *Outcome*, *Origin status*, *Request ID*,
+  *User* and *Resolved refs*.
+- v0.13.0 sends no `X-Passport-Proxy-Request-Id` header (the Proxy's
+  `channel/beta` adds it), so `demo verify` and `handson verify` read the
+  request ID from the audit file.
 
 ## Read in source, not run (production, 2026-11-24)
 

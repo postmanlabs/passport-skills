@@ -17,7 +17,7 @@ VAULT_C=$P-vault PROXY_C=$P-proxy NET=$P-net VOL=$P-vault-data
 LABEL=com.postman.passport-onboarding
 STATE=$ONB/state.json
 API_BODY=$ONB/.api-body
-API_STATUS=000 PROXY_ERR='' PROXY_REQ='' CLI_REAUTH=''
+API_STATUS=000 PROXY_ERR='' CLI_REAUTH=''
 SAMPLE_KEY=sdfdsfdsfsdfdfsdfds
 DEMO_NS=passport-proxy-local-e2e
 HANDSON_NS=passport-api
@@ -120,7 +120,7 @@ pointer() { # "METHOD host/path" secret-reference-name
     | (([$refs[] | select(.name == $n)] + (if ($refs | length) == 1 then $refs else [] end))[0].secretReference) // empty'
 }
 # passport request with headers shown; sets API_STATUS, body to $API_BODY,
-# and PROXY_ERR / PROXY_REQ from the response headers.
+# and PROXY_ERR from the response headers.
 via_proxy() { # METHOD URL BODY HEADER
   local raw args
   args=(request --show-headers -X "$1" -H "$4" -H 'Accept: application/json')
@@ -132,10 +132,24 @@ via_proxy() { # METHOD URL BODY HEADER
   PROXY_ERR=$(printf '%s\n' "$raw" | sed -n 's/^[Xx]-[Pp]assport-[Pp]roxy-[Ee]rror:[[:space:]]*//p' | head -1 | tr -d '\r')
   # No HTTP status = the CLI itself failed; keep its first error line for the hint.
   [ "$API_STATUS" = 000 ] && [ -z "$PROXY_ERR" ] && PROXY_ERR="passport CLI: $(printf '%s\n' "$raw" | grep -m1 -iE 'error|code=|fail' | cut -c1-160 | tr -d '\r')"
-  PROXY_REQ=$(printf '%s\n' "$raw" | sed -n 's/^[Xx]-[Pp]assport-[Pp]roxy-[Rr]equest-[Ii]d:[[:space:]]*//p' | head -1 | tr -d '\r')
   # shortcut: assumes --show-headers prints status + headers, a blank line, then the body (unverified).
   printf '%s\n' "$raw" | awk 'body { print } /^\r?$/ { body = 1 }' > "$API_BODY"
   [ -s "$API_BODY" ] || printf '%s\n' "$raw" | tail -1 > "$API_BODY"
+}
+# Where the user finds a request in the Proxy console: its URL, and the Proxy's audit event for the
+# newest request that carried this pointer (null if none yet). The Proxy appends one OTLP JSON line
+# per request to audit/audit.jsonl, after it has replied, so give it a few seconds.
+console_view() { # pointer
+  local f=$ONB/audit/audit.jsonl ev='' i
+  for i in 1 2 3 4 5; do
+    [ -s "$f" ] && ev=$(jq -c --arg p "$1" '.resourceLogs[]?.scopeLogs[]?.logRecords[]?
+      | (reduce .attributes[]? as $kv ({}; .[$kv.key] = ($kv.value.stringValue // $kv.value.intValue // [$kv.value.arrayValue.values[]?.stringValue]))) as $a
+      | select(($a["passport.secret_references_used"] // []) | index($p) != null)
+      | {requestId: $a["passport.request_id"], outcome: $a["passport.outcome"],
+         originStatus: ($a["http.response.status_code"] // null | tonumber? // null)}' "$f" 2>/dev/null | tail -1)
+    [ -n "$ev" ] && break; sleep 1
+  done
+  printf '{"url":%s,"event":%s}' "$(js "$(env_get "$ONB/proxy.env" PASSPORT_PROXY_PUBLIC_MANAGEMENT_URL)/console")" "${ev:-null}"
 }
 # The last call's status, also when api() ran inside $(…).
 api_status() { cat "$API_BODY.status" 2>/dev/null || echo 000; }
@@ -539,7 +553,7 @@ demo_verify() {
   st=$(jq -r '.status // empty' "$API_BODY" 2>/dev/null); key=$(jq -r '.key // empty' "$API_BODY" 2>/dev/null); len=$(jq -r '.key_length // empty' "$API_BODY" 2>/dev/null)
   if [ "$st" = authenticated ] && [ "$len" = 19 ]; then
     mark_done demo
-    emit "{\"pass\":true,\"http\":$(js "$API_STATUS"),\"pointer\":$(js "$ref"),\"keyReceived\":$(js "$key"),\"keyLength\":$len,\"proxyRequestId\":$(js "${PROXY_REQ:-}")}"
+    emit "{\"pass\":true,\"http\":$(js "$API_STATUS"),\"pointer\":$(js "$ref"),\"keyReceived\":$(js "$key"),\"keyLength\":$len,\"console\":$(console_view "$ref")}"
   else
     die 1 demo_failed "The demo call didn't pass (HTTP $API_STATUS, received ${key:-nothing}, length ${len:-?}${PROXY_ERR:+, proxy error $PROXY_ERR}). See troubleshooting.md."
   fi
@@ -604,7 +618,7 @@ handson_verify() {
   [ -n "$CLI_REAUTH" ] && die 2 cli_signed_out "The Passport CLI's sign-in expired. Run: passport login"
   if [ "$API_STATUS" = 200 ] && jq -e --arg n "$HANDSON_NS" '[.data[]?.name] | index($n)' "$API_BODY" >/dev/null 2>&1; then
     sset '.handson.verified = $v' true
-    emit "{\"pass\":true,\"http\":200,\"namespaces\":$(jq -c '[.data[]?.name]' "$API_BODY"),\"proxyRequestId\":$(js "${PROXY_REQ:-}")}" user "Revoke the first API key in the app, then tell me" "passport-onboard handson finish"
+    emit "{\"pass\":true,\"http\":200,\"namespaces\":$(jq -c '[.data[]?.name]' "$API_BODY"),\"pointer\":$(js "$ref"),\"console\":$(console_view "$ref")}" user "Revoke the first API key in the app, then tell me" "passport-onboard handson finish"
   else
     die 1 handson_failed "The call through the Proxy didn't pass (HTTP $API_STATUS${PROXY_ERR:+, proxy error $PROXY_ERR}). $(api_err) See troubleshooting.md."
   fi
