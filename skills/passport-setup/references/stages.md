@@ -119,7 +119,8 @@ Run `passport-onboard vault up`. Report the container, the Secret Vault (HashiCo
    Password: passport-local
    ```
 
-   **`proxy.env` says how to change the password."**
+   **Both are written in `~/.passport/onboarding/proxy.env`, under *Proxy
+   console*, which also says how to change the password."**
 
 ## 7. Authenticate the CLI — agent, the user approves in the browser
 
@@ -232,7 +233,9 @@ key."** Run `passport-onboard handson plan` for the values below.
    part to fix: no secret at that path, or no key named `value`.
 4. `passport-onboard handson verify`: a call to the public API through the
    Proxy using only the Secret Reference. Show the namespaces it returned.
-5. Open `<data.console.url>` again, then say: **"In the console's *Activity*,
+5. Open `<data.console.url>` again, then say: **"If the console asks you to
+   sign in again, use `admin` / `passport-local` (written in
+   `~/.passport/onboarding/proxy.env`, under *Proxy console*). In *Activity*,
    the top row is that call: `GET <API host>/public/v1/namespaces`. Click it.
    *Resolved refs* is `<data.pointer>`, your pointer for `passport-api-key`;
    *Outcome* and *Origin status* show 200, Passport's answer to the key the
