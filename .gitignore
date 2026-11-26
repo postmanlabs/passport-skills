@@ -3,3 +3,8 @@
 *.pem
 *.env
 state.env
+# The skills' URL lists hold no secrets and must ship
+!shared/urls.env
+!skills/*/references/urls.env
+# Local-only end-to-end test harness; never committed
+tests/e2e/

@@ -8,15 +8,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: shellcheck
-        run: shellcheck --severity=warning "$SKILL"/scripts/*.sh
-      - name: JS syntax
-        run: for f in "$SKILL"/scripts/*.js "$SKILL"/templates/*.js; do node --check "$f"; done
+        run: |
+          shellcheck --severity=warning -s bash "$SKILL"/scripts/passport-onboard tools/*.sh
+          shellcheck --severity=warning -s sh "$SKILL"/templates/vault-start.sh
+      - name: Shared files are copied into every skill
+        run: tools/sync-shared.sh --check
+      - name: Scripts never touch the CLI's passportrc (it holds live tokens)
+        run: |
+          ! grep -rn 'passportrc' skills/*/scripts skills/*/templates tools
+      - name: passport-onboard smoke test (no Docker, no network writes)
+        run: |
+          export PASSPORT_ONBOARD_HOME="$(mktemp -d)" PASSPORT_ONBOARD_PREFIX=citest
+          S="$SKILL/scripts/passport-onboard"
+          "$S" status | jq -e '.ok and .data.next == "welcome"'
+          "$S" mark welcome | jq -e '.data.marked == "welcome"'
+          [ "$("$S" status --line)" = "[#---------] 1/10 done · next: Choose your setup" ]
+          "$S" demo plan | jq -e '.data.objects | length == 5'
+          "$S" handson plan | jq -e '.data.objects[3].path == "/public/v1/*"'
+          set +e
+          "$S" mark nope >/dev/null; [ $? -eq 1 ] || exit 1
+          "$S" proxy prepare >/dev/null; [ $? -eq 3 ] || exit 1
+          "$S" key check >/dev/null; [ $? -eq 3 ] || exit 1
       - name: JSON validity
         run: |
           jq empty .claude-plugin/plugin.json .claude-plugin/marketplace.json \
             .codex-plugin/plugin.json .agents/plugins/marketplace.json \
-            .cursor-plugin/plugin.json .cursor-plugin/marketplace.json "$SKILL"/templates/*.json
-          jq empty "$SKILL"/templates/*.json.tmpl 2>/dev/null || true
+            .cursor-plugin/plugin.json .cursor-plugin/marketplace.json
       - name: Plugin manifests agree
         run: |
           fail() { echo "$1"; exit 1; }
@@ -30,18 +47,28 @@ jobs:
           [ "$(jq -r .version .claude-plugin/plugin.json .codex-plugin/plugin.json .cursor-plugin/plugin.json | sort -u | wc -l)" -eq 1 ] \
             || fail "plugin.json versions differ"
       - name: Entry points exist
-        run: test -f AGENTS.md -a -f "$SKILL/SKILL.md" -a -f "$SKILL/guides/local-docker.md" -a -f "$SKILL/guides/aws-single-instance.md"
+        run: |
+          for f in AGENTS.md "$SKILL/SKILL.md" "$SKILL/references/stages.md" "$SKILL/references/welcome.md" \
+            "$SKILL/scripts/passport-onboard" skills/passport-public-api/SKILL.md; do
+            test -f "$f" || { echo "missing: $f"; exit 1; }
+          done
+          test -x "$SKILL/scripts/passport-onboard" || { echo "passport-onboard must be executable"; exit 1; }
       - name: Paths mentioned in markdown exist (relative to the skill folder)
         run: |
           missing=0
-          for f in $(grep -rhoE '(guides|scripts|templates)/[A-Za-z0-9_./-]+\.(md|sh|js|json|tmpl)' --include='*.md' . | sort -u); do
+          for f in $(grep -rhoE '(references|scripts|templates)/[A-Za-z0-9_./-]+\.(md|sh|env|hcl|tmpl)' --include='*.md' . | sort -u); do
             [ -e "$SKILL/$f" ] || { echo "missing: $f"; missing=1; }
           done
           exit $missing
-      - name: Skill is self-contained (no symlinks)
+      - name: Skills are self-contained (no symlinks)
         run: |
-          links=$(find "$SKILL" -type l)
-          [ -z "$links" ] || { echo "symlinks in the skill folder: $links"; exit 1; }
+          links=$(find skills -type l)
+          [ -z "$links" ] || { echo "symlinks in a skill folder: $links"; exit 1; }
+      - name: SKILL.md stays short (detail belongs in references/)
+        run: |
+          for f in skills/*/SKILL.md; do
+            [ "$(wc -l < "$f")" -le 160 ] || { echo "$f is over 160 lines"; exit 1; }
+          done
       - name: SKILL.md frontmatter
         run: |
           for f in skills/*/SKILL.md; do

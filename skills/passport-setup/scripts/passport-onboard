@@ -1,0 +1,680 @@
+#!/usr/bin/env bash
+# passport-onboard: agent-side plumbing for the passport-setup skill.
+# The agent runs every command; the user never types this script.
+# Output: one JSON object on stdout:
+#   {ok, stage, data, next:{who, say, run}}  or  {ok:false, stage, error:{code, hint}}
+# Exit: 0 done · 2 waiting on the user · 3 precondition missing · 1 error.
+# Never prints a secret value. Works in bash 3.2 (macOS) and zsh-launched shells.
+set -uo pipefail
+
+SKILL_DIR=$(cd "$(dirname "$0")/.." && pwd)
+# shellcheck source=../references/urls.env
+. "$SKILL_DIR/references/urls.env"
+
+ONB=${PASSPORT_ONBOARD_HOME:-$HOME/.passport/onboarding}
+P=${PASSPORT_ONBOARD_PREFIX:-passport}   # Docker name prefix; tests override it
+VAULT_C=$P-vault PROXY_C=$P-proxy NET=$P-net VOL=$P-vault-data
+LABEL=com.postman.passport-onboarding
+STATE=$ONB/state.json
+API_BODY=$ONB/.api-body
+API_STATUS=000 PROXY_ERR='' CLI_REAUTH=''
+SAMPLE_KEY=sdfdsfdsfsdfdfsdfds
+DEMO_NS=passport-proxy-local-e2e
+HANDSON_NS=passport-api
+HANDSON_SECRET=passport-api-key   # the Secret Reference
+HANDSON_PATH=passport/api-key      # its secret, under secret/
+DEMO_RG="Passport demo API" HANDSON_RG="Passport public API"   # a Resource Group is named for its API
+API_HOST=${PASSPORT_API_URL#https://}; API_HOST=${API_HOST%%/*}
+STAGES="welcome setup-type machine-check account vault proxy cli demo tour handson"
+STAGE=status
+
+# ---------- output ----------
+js() { local s=${1//\\/\\\\}; s=${s//\"/\\\"}; s=${s//$'\n'/\\n}; s=${s//$'\t'/\\t}; s=${s//$'\r'/}; printf '"%s"' "$s"; }
+emit() { # data-json [who say run]
+  local data=${1:-}; [ -n "$data" ] || data='{}'
+  printf '{"ok":true,"stage":%s,"data":%s' "$(js "$STAGE")" "$data"
+  [ $# -ge 2 ] && printf ',"next":{"who":%s,"say":%s,"run":%s}' "$(js "$2")" "$(js "${3:-}")" "$(js "${4:-}")"
+  printf '}\n'
+}
+die() { # exit-code code hint [logs]
+  local extra=; [ $# -ge 4 ] && extra=",\"logs\":$(js "$4")"
+  printf '{"ok":false,"stage":%s,"error":{"code":%s,"hint":%s%s}}\n' "$(js "$STAGE")" "$(js "$2")" "$(js "$3")" "$extra"
+  exit "$1"
+}
+need() { local t; for t in "$@"; do command -v "$t" >/dev/null 2>&1 || die 3 missing_tool "$t is not installed. Run: passport-onboard doctor"; done; }
+stage_name() {
+  case $1 in
+    welcome) echo Welcome;; setup-type) echo "Choose your setup";; machine-check) echo "Check prerequisites";;
+    account) echo "Sign in to the app";; vault) echo "Start the Secret Vault";; proxy) echo "Deploy the Proxy";;
+    cli) echo "Authenticate the CLI";; demo) echo "Verify secret resolution with a sample API";;
+    tour) echo "Walk through what was created";; handson) echo "Protect your first API";; *) return 1;;
+  esac
+}
+
+# ---------- state (~/.passport/onboarding/state.json) ----------
+state_init() {
+  (umask 077; mkdir -p "$ONB") || die 1 state_dir "Cannot create $ONB"
+  chmod 700 "$ONB"
+  [ -s "$STATE" ] || printf '{"version":1,"done":[]}\n' > "$STATE"
+}
+sget() { jq -r "$1 // empty" "$STATE" 2>/dev/null; }
+sset() { # jq-filter [value as $v]
+  local tmp; tmp=$(mktemp "$ONB/.state.XXXXXX") || return 1
+  jq --arg v "${2-}" "$1" "$STATE" > "$tmp" && mv "$tmp" "$STATE"
+}
+mark_done() { sset '.done |= ((. + [$v]) | unique)' "$1"; }
+is_done() { jq -e --arg v "$1" '.done | index($v)' "$STATE" >/dev/null 2>&1; }
+
+# ---------- env files (KEY=value; full-line comments only, as docker --env-file reads them) ----------
+env_get() { sed -n "s/^$2=//p" "$1" 2>/dev/null | tail -1 | tr -d '\r' | sed 's/^[[:space:]"]*//; s/[[:space:]"]*$//'; }
+env_set() { # file key value — replaces the KEY= line, keeps comments and everything else
+  local tmp; tmp=$(mktemp "$ONB/.env.XXXXXX") || return 1
+  awk -v k="$2" -v v="$3" 'index($0, k "=") == 1 { print k "=" v; done = 1; next } { print } END { if (!done) print k "=" v }' "$1" > "$tmp" \
+    && chmod 600 "$tmp" && mv "$tmp" "$1"
+}
+
+# ---------- small checks ----------
+port_busy() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+# System resolver, as the CLI uses it (curl resolves *.localhost on its own, so it can't tell).
+resolves() { ping -c 1 "$1" 2>&1 | head -1 | grep -q '127\.0\.0\.1'; }
+version_lt() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -t. -k1,1n -k2,2n -k3,3n | head -1)" = "$1" ]; }
+ours() { [ "$(docker inspect -f "{{index .Config.Labels \"$LABEL\"}}" "$1" 2>/dev/null)" = 1 ]; }
+exists() { docker inspect "$1" >/dev/null 2>&1; }
+running() { [ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null)" = true ]; }
+vexec() { VAULT_TOKEN=$(cat "$ONB/vault/root-token" 2>/dev/null) docker exec -e VAULT_TOKEN "$VAULT_C" vault "$@"; }
+vault_ok() { running "$VAULT_C" && docker exec "$VAULT_C" vault status >/dev/null 2>&1; }
+proxy_ok() { running "$PROXY_C"; }   # registration itself is checked with Passport Cloud in proxy start
+restarts() { docker inspect -f '{{.RestartCount}}' "$1" 2>/dev/null || echo 0; }
+redact() { # log lines for the agent: secret-looking values hidden, control characters dropped so the JSON stays valid
+  tr -d '\000-\010\013-\037' | sed -E -e 's/([Bb]earer )[^[:space:]",]+/\1[hidden]/g' \
+    -e 's/(([Tt]oken|TOKEN|[Ss]ecret|SECRET|[Pp]assword|PASSWORD|[Aa]pi_?[Kk]ey|API_KEY)[^=:]{0,20}[=:][[:space:]]*"?)[^[:space:]",]+/\1[hidden]/g'
+}
+vault_ui() { local hp; hp=$(docker port "$VAULT_C" 8200/tcp 2>/dev/null | head -1); [ -n "$hp" ] && echo "http://127.0.0.1:${hp##*:}/ui"; }
+
+# ---------- public API ----------
+# Before hands-on: the bootstrap key from api-key.env. After hands-on: through the
+# Proxy with the user's pointer for the passport-api-key slot, so no key is ever in hand.
+# Sets API_STATUS; the response body is in $API_BODY.
+HANDSON_EP="* $API_HOST/public/v1/*"
+api() { # METHOD PATH [JSON-BODY]
+  local key ref args
+  : > "$API_BODY"; chmod 600 "$API_BODY"
+  key=$(env_get "$ONB/api-key.env" PASSPORT_API_KEY)
+  if [ -n "$key" ]; then
+    args=(-sS -m 30 --config - -X "$1" -H 'Accept: application/json' -o "$API_BODY" -w '%{http_code}')
+    [ -n "${3-}" ] && args+=(-H 'Content-Type: application/json' --data-binary "$3")
+    API_STATUS=$(printf 'header = "Authorization: Bearer %s"\n' "$key" | curl "${args[@]}" "$PASSPORT_API_URL$2") || API_STATUS=000
+  else
+    ref=$(pointer "$HANDSON_EP" "$HANDSON_SECRET")
+    [ -n "$ref" ] || { API_STATUS=000; printf 000 > "$API_BODY.status"; return 1; }
+    via_proxy "$1" "$PASSPORT_API_URL$2" "${3-}" "Authorization: Bearer {{vault:$ref}}"
+  fi
+  printf '%s' "$API_STATUS" > "$API_BODY.status"
+}
+# The pointer a request carries in {{vault:<pointer>}}: issued to this user for one slot of one
+# Endpoint under their Access Grant, and listed in the client certificate. It isn't the Secret
+# Reference's ID, and a new Access Grant issues a new one, so read it fresh from the certificate.
+pointer() { # "METHOD host/path" secret-reference-name
+  passport whoami --json 2>/dev/null | jq -r --arg ep "$1" --arg n "$2" '
+    (.allowedApiRefs[$ep] // []) as $refs
+    | (([$refs[] | select(.name == $n)] + (if ($refs | length) == 1 then $refs else [] end))[0].secretReference) // empty'
+}
+# passport request with headers shown; sets API_STATUS, body to $API_BODY,
+# and PROXY_ERR from the response headers.
+via_proxy() { # METHOD URL BODY HEADER
+  local raw args
+  args=(request --show-headers -X "$1" -H "$4" -H 'Accept: application/json')
+  [ -n "${3-}" ] && args+=(-H 'Content-Type: application/json' -d "$3")
+  raw=$(passport "${args[@]}" -- "$2" 2>&1) || true   # -H takes values up to the next option; -- ends them
+  API_STATUS=$(printf '%s\n' "$raw" | head -1 | grep -oE '(^| )[1-5][0-9][0-9]( |$)' | head -1 | tr -d ' ')
+  [ -n "$API_STATUS" ] || API_STATUS=000
+  CLI_REAUTH=''; case $raw in *WORKOS_REAUTH_REQUIRED*) CLI_REAUTH=1;; esac
+  PROXY_ERR=$(printf '%s\n' "$raw" | sed -n 's/^[Xx]-[Pp]assport-[Pp]roxy-[Ee]rror:[[:space:]]*//p' | head -1 | tr -d '\r')
+  # No HTTP status = the CLI itself failed; keep its first error line for the hint.
+  [ "$API_STATUS" = 000 ] && [ -z "$PROXY_ERR" ] && PROXY_ERR="passport CLI: $(printf '%s\n' "$raw" | grep -m1 -iE 'error|code=|fail' | cut -c1-160 | tr -d '\r')"
+  # shortcut: assumes --show-headers prints status + headers, a blank line, then the body (unverified).
+  printf '%s\n' "$raw" | awk 'body { print } /^\r?$/ { body = 1 }' > "$API_BODY"
+  [ -s "$API_BODY" ] || printf '%s\n' "$raw" | tail -1 > "$API_BODY"
+}
+# Where the user finds a request in the Proxy console: its URL, and the Proxy's audit event for the
+# newest request that carried this pointer (null if none yet). The Proxy appends one OTLP JSON line
+# per request to audit/audit.jsonl, after it has replied, so give it a few seconds.
+console_view() { # pointer
+  local f=$ONB/audit/audit.jsonl ev='' i
+  for i in 1 2 3 4 5; do
+    [ -s "$f" ] && ev=$(jq -c --arg p "$1" '.resourceLogs[]?.scopeLogs[]?.logRecords[]?
+      | (reduce .attributes[]? as $kv ({}; .[$kv.key] = ($kv.value.stringValue // $kv.value.intValue // [$kv.value.arrayValue.values[]?.stringValue]))) as $a
+      | select(($a["passport.secret_references_used"] // []) | index($p) != null)
+      | {requestId: $a["passport.request_id"], outcome: $a["passport.outcome"],
+         originStatus: ($a["http.response.status_code"] // null | tonumber? // null)}' "$f" 2>/dev/null | tail -1)
+    [ -n "$ev" ] && break; sleep 1
+  done
+  printf '{"url":%s,"event":%s}' "$(js "$(env_get "$ONB/proxy.env" PASSPORT_PROXY_PUBLIC_MANAGEMENT_URL)/console")" "${ev:-null}"
+}
+# The last call's status, also when api() ran inside $(…).
+api_status() { cat "$API_BODY.status" 2>/dev/null || echo 000; }
+api_err() {
+  [ "$(api_status)" = 000 ] && { echo "No reply from Passport Cloud; check the network or VPN."; return; }
+  jq -r '[.code // .error.code // empty, .detail // .title // .error.message // .message // empty] | map(tostring) | join(": ")' "$API_BODY" 2>/dev/null
+}
+# First id in a list whose item matches FILTER ($v = VALUE); follows nextCursor.
+find_id() { # PATH FILTER [VALUE]
+  local sep='?' cursor='' id
+  case $1 in *\?*) sep='&';; esac
+  while :; do
+    api GET "$1${sep}limit=100${cursor:+&cursor=$cursor}" || return 1
+    [ "$API_STATUS" = 200 ] || return 1
+    id=$(jq -r --arg v "${3-}" "[.data[]? | select($2) | .id][0] // empty" "$API_BODY") || return 1
+    [ -n "$id" ] && { echo "$id"; return 0; }
+    cursor=$(jq -r '.pagination.nextCursor // empty' "$API_BODY")
+    [ -n "$cursor" ] || return 0
+  done
+}
+create() { # PATH BODY → id
+  api POST "$1" "$2" || return 1
+  case $API_STATUS in 200|201) jq -r '.data.id' "$API_BODY";; *) return 1;; esac
+}
+active_grant() { # NS RG EP → grant id covering the Endpoint
+  find_id "/public/v1/access-grants?namespaceId=$1&status=active" \
+    '(.scopeType == "endpoint" and .scopeValue == ($v | split(" ")[1])) or (.scopeType == "resource_group" and .scopeValue == ($v | split(" ")[0])) or .scopeType == "namespace"' "$2 $3"
+}
+
+# ---------- commands ----------
+cmd_status() {
+  local os line=false s next='' done_list='' n=0 total=0 bar=''
+  [ "${1:-}" = --line ] && line=true
+  os=$(uname -s)
+  case $os in Darwin|Linux) ;; *) die 3 unsupported_os "Passport setup supports macOS and Linux. Windows isn't supported yet.";; esac
+  need jq
+  state_init
+  for s in $STAGES; do
+    total=$((total + 1))
+    if is_done "$s" && live_ok "$s"; then
+      n=$((n + 1)); done_list="$done_list${done_list:+,}$(js "$s")"
+    elif [ -z "$next" ]; then next=$s; fi
+  done
+  local i=0 line_text
+  while [ $i -lt "$total" ]; do i=$((i + 1)); if [ $i -le "$n" ]; then bar="$bar#"; else bar="$bar-"; fi; done
+  local label=''; [ -n "$next" ] && label=$(stage_name "$next")
+  # handson is two steps for the user: after verify only the revoke is left
+  [ "$next" = handson ] && [ "$(sget .handson.verified)" = true ] && label="Revoke the setup key"
+  [ -n "$next" ] && line_text="[$bar] $n/$total done · next: $label" || line_text="[$bar] $total/$total done · Passport is set up"
+  if $line; then printf '%s\n' "$line_text"; return 0; fi
+  emit "{\"os\":$(js "$os"),\"done\":[${done_list}],\"next\":$(js "$next"),\"resume\":$([ "$n" -gt 0 ] && echo true || echo false),\"line\":$(js "$line_text")}"
+}
+live_ok() { # stage — reality wins over state.json for the parts that can break
+  case $1 in
+    vault) vault_ok;;
+    proxy) proxy_ok;;
+    cli) passport whoami >/dev/null 2>&1;;
+    *) return 0;;
+  esac
+}
+
+cmd_mark() { # stage
+  STAGE=${1:-}
+  stage_name "$STAGE" >/dev/null || die 1 unknown_stage "Unknown stage. Stages: $STAGES"
+  need jq; state_init; mark_done "$STAGE"
+  emit "{\"marked\":$(js "$STAGE")}"
+}
+
+cmd_doctor() {
+  STAGE=machine-check
+  local os rows='' blocking=false t fix v n p
+  os=$(uname -s)
+  row() { # tool purpose status [fix]
+    rows="$rows${rows:+,}{\"tool\":$(js "$1"),\"purpose\":$(js "$2"),\"status\":$(js "$3"),\"fix\":$(js "${4:-}")}"
+    case $3 in ok|info) ;; *) blocking=true;; esac
+  }
+  pkg() {
+    case $os in
+      Darwin) command -v brew >/dev/null 2>&1 && echo "brew install $1" || echo "Install Homebrew (https://brew.sh), then: brew install $1";;
+      *) if command -v apt-get >/dev/null 2>&1; then echo "sudo apt-get install -y $1"
+         elif command -v dnf >/dev/null 2>&1; then echo "sudo dnf install -y $1"
+         else echo "Install $1 with your package manager"; fi;;
+    esac
+  }
+  case $os in Darwin|Linux) ;; *) die 3 unsupported_os "Passport setup supports macOS and Linux. Windows isn't supported yet.";; esac
+  if ! command -v docker >/dev/null 2>&1; then
+    row docker "Runs the Secret Vault (HashiCorp) and the Proxy on this machine" missing "Install Docker Desktop, OrbStack or Colima (macOS) or Docker Engine (Linux): https://docs.docker.com/get-docker/"
+  elif ! docker info >/dev/null 2>&1; then
+    row docker "Runs the Secret Vault (HashiCorp) and the Proxy on this machine" not-running "Start Docker (Docker Desktop, OrbStack or Colima), then check again"
+  else row docker "Runs the Secret Vault (HashiCorp) and the Proxy on this machine" ok; fi
+  for t in curl jq openssl; do
+    case $t in
+      curl) p="Calls the Passport API and downloads the CLI";;
+      jq) p="Reads the Passport API's JSON replies";;
+      openssl) p="Creates the Proxy's two private keys: one signs your client certificate, one decrypts Secret References";;
+    esac
+    if command -v "$t" >/dev/null 2>&1; then row "$t" "$p" ok; else row "$t" "$p" missing "$(pkg "$t")"; fi
+  done
+  fix="curl -fsSL \"$PASSPORT_CLI_INSTALLER\" | sh   (you run it; it asks for your password)"
+  if command -v passport >/dev/null 2>&1; then
+    v=$(passport --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    if [ -z "$v" ] || version_lt "$v" "$PASSPORT_CLI_MIN_VERSION"; then
+      row "Passport CLI" "Signs you in and sends requests through the Proxy" outdated "Needs $PASSPORT_CLI_MIN_VERSION or newer (found ${v:-unknown}). Update: $fix"
+    else row "Passport CLI" "Signs you in and sends requests through the Proxy" ok; fi
+    if command -v npm >/dev/null 2>&1 && npm ls -g @postman/postman-passport >/dev/null 2>&1; then
+      row "Passport CLI (npm)" "Old community edition of the CLI; conflicts with the real one" conflict "npm uninstall -g @postman/postman-passport"
+    fi
+    n=$(type -a passport 2>/dev/null | sort -u | wc -l | tr -d ' ')
+    [ "$n" -gt 1 ] && row "Passport CLI (PATH)" "More than one passport on PATH; the first one runs" info "$(type -a passport | sort -u | tr '\n' ';')"
+  else
+    row "Passport CLI" "Signs you in and sends requests through the Proxy" missing "$fix"
+  fi
+  for t in 8443 8081; do
+    if port_busy "$t" && ! running "$PROXY_C"; then row "port $t" "The Proxy listens here" in-use "Stop whatever uses 127.0.0.1:$t, then check again"; fi
+  done
+  # Environment checks get a row only when they fail; the table is about tools.
+  t=$(curl -s -m 15 -o /dev/null -w '%{http_code}' "$PASSPORT_API_URL/llms.txt" 2>/dev/null)
+  [ "$t" = 200 ] || row "Passport Cloud" "Holds your rules" unreachable "Can't reach $PASSPORT_API_URL (got ${t:-no reply}). Check your network or VPN."
+  if command -v jq >/dev/null 2>&1 && ! $blocking; then state_init; mark_done machine-check; fi
+  if $blocking; then emit "{\"ready\":false,\"checks\":[$rows]}" user "Some tools are missing or need attention" "passport-onboard doctor"
+  else emit "{\"ready\":true,\"checks\":[$rows]}"; fi
+}
+
+cmd_vault() {
+  STAGE=vault
+  case ${1:-} in
+    up) shift; vault_up "$@";;
+    check) shift; vault_check "$@";;
+    *) die 1 usage "passport-onboard vault up | vault check <path>";;
+  esac
+}
+vault_up() {
+  need docker jq; state_init
+  local status init key i
+  mkdir -p "$ONB/vault/config" "$ONB/vault/unseal"; chmod 700 "$ONB/vault" "$ONB/vault/unseal"
+  cp "$SKILL_DIR/templates/vault.hcl" "$SKILL_DIR/templates/vault-start.sh" "$ONB/vault/config/"
+  docker network inspect "$NET" >/dev/null 2>&1 || docker network create --label "$LABEL=1" "$NET" >/dev/null || die 1 docker_network "Couldn't create Docker network $NET"
+  docker volume inspect "$VOL" >/dev/null 2>&1 || docker volume create --label "$LABEL=1" "$VOL" >/dev/null || die 1 docker_volume "Couldn't create Docker volume $VOL"
+  if exists "$VAULT_C"; then
+    ours "$VAULT_C" || die 3 name_taken "A container named $VAULT_C exists and wasn't made by this skill. Rename or remove it yourself, then rerun."
+    running "$VAULT_C" || docker start "$VAULT_C" >/dev/null || die 1 vault_start "docker start $VAULT_C failed"
+  else
+    vault_run 127.0.0.1:8200:8200 || { docker rm -f "$VAULT_C" >/dev/null 2>&1; vault_run 127.0.0.1::8200; } \
+      || die 1 vault_start "Couldn't start the Secret Vault (HashiCorp). Check: docker logs $VAULT_C"
+  fi
+  for i in $(seq 1 60); do
+    status=$(docker exec "$VAULT_C" vault status -format=json 2>/dev/null) && break
+    [ -n "$status" ] && break
+    sleep 1
+  done
+  # Our own container: stop it so its restart policy doesn't loop on a broken start.
+  [ -n "$status" ] || { docker stop "$VAULT_C" >/dev/null 2>&1; die 1 vault_not_ready "The Secret Vault (HashiCorp) didn't answer within 60 s; stopped it. Check: docker logs $VAULT_C"; }
+  init=$(printf '%s' "$status" | jq -r .initialized)
+  if [ "$init" != true ]; then
+    init=$(docker exec "$VAULT_C" vault operator init -key-shares=1 -key-threshold=1 -format=json) || die 1 vault_init "vault operator init failed"
+    (umask 077
+     printf '%s' "$init" | jq -r '.unseal_keys_b64[0]' > "$ONB/vault/unseal/unseal-key"
+     printf '%s' "$init" | jq -r '.root_token' > "$ONB/vault/root-token")
+  fi
+  if ! docker exec "$VAULT_C" vault status >/dev/null 2>&1; then
+    key=$(cat "$ONB/vault/unseal/unseal-key" 2>/dev/null) || die 3 vault_key_missing "The Secret Vault (HashiCorp) is locked and its unseal key is gone from $ONB/vault/unseal. See troubleshooting.md, 'Secret Vault (HashiCorp) data lost'."
+    docker exec "$VAULT_C" vault operator unseal "$key" >/dev/null || die 1 vault_unseal "Couldn't unlock the Secret Vault (HashiCorp)"
+  fi
+  vexec secrets list -format=json 2>/dev/null | jq -e 'has("secret/")' >/dev/null \
+    || vexec secrets enable -path=secret kv-v2 >/dev/null || die 1 vault_kv "Couldn't enable the secret/ store"
+  vexec kv get secret/demo-api-key >/dev/null 2>&1 \
+    || vexec kv put secret/demo-api-key value="$SAMPLE_KEY" >/dev/null || die 1 vault_seed "Couldn't store the demo secret"
+  [ -s "$ONB/proxy.env" ] && env_set "$ONB/proxy.env" VAULT_TOKEN "$(cat "$ONB/vault/root-token")"
+  mark_done vault
+  emit "{\"container\":$(js "$VAULT_C"),\"ui\":$(js "$(vault_ui)"),\"demoSecret\":\"secret/demo-api-key\",\"rootTokenFile\":$(js "$ONB/vault/root-token")}"
+}
+vault_run() { # host-port mapping
+  docker run -d --name "$VAULT_C" --label "$LABEL=1" --network "$NET" --restart unless-stopped \
+    -p "$1" -v "$VOL:/vault/file" -v "$ONB/vault/config:/vault/config:ro" -v "$ONB/vault/unseal:/vault/unseal:ro" \
+    -e VAULT_ADDR=http://127.0.0.1:8200 --entrypoint /bin/sh "$PASSPORT_VAULT_IMAGE" /vault/config/vault-start.sh >/dev/null 2>&1
+}
+vault_check() { # path under secret/ — reports presence of the key "value", never the value
+  local path=${1:-}
+  [ -n "$path" ] || die 1 usage "passport-onboard vault check <path>"
+  vault_ok || die 3 vault_down "The Secret Vault (HashiCorp) isn't running. Run: passport-onboard vault up"
+  if ! vexec kv metadata get "secret/$path" >/dev/null 2>&1; then
+    emit "{\"path\":$(js "secret/$path"),\"exists\":false,\"hasValue\":false,\"ui\":$(js "$(vault_ui)")}" user "No secret at secret/$path yet"; exit 2
+  fi
+  if vexec kv get -format=json "secret/$path" 2>/dev/null | jq -e '(.data.data.value // "") | length > 0' >/dev/null; then
+    emit "{\"path\":$(js "secret/$path"),\"exists\":true,\"hasValue\":true}"
+  else
+    emit "{\"path\":$(js "secret/$path"),\"exists\":true,\"hasValue\":false}" user "The secret exists but has no key named value"; exit 2
+  fi
+}
+
+cmd_proxy() {
+  STAGE=proxy
+  case ${1:-} in
+    prepare) proxy_prepare;;
+    start) proxy_start;;
+    *) die 1 usage "passport-onboard proxy prepare | proxy start";;
+  esac
+}
+proxy_urls() { # sets PUB_URL MGMT_URL from free ports and *.localhost resolution
+  if { running "$PROXY_C" || { ! port_busy 443 && ! port_busy 80; }; } && resolves passport-proxy.localhost && resolves passport-management.localhost; then
+    PUB_URL=https://passport-proxy.localhost MGMT_URL=http://passport-management.localhost
+  else
+    PUB_URL=https://localhost:8443 MGMT_URL=http://localhost:8081
+  fi
+}
+proxy_prepare() {
+  need openssl jq; state_init
+  [ -s "$ONB/vault/root-token" ] || die 3 vault_first "Set up the Secret Vault (HashiCorp) first: passport-onboard vault up"
+  (umask 077; mkdir -p "$ONB/keys" "$ONB/audit"
+   [ -s "$ONB/keys/ca.pem" ] || openssl genrsa -out "$ONB/keys/ca.pem" 2048 2>/dev/null
+   [ -s "$ONB/keys/ref.pem" ] || openssl genrsa -out "$ONB/keys/ref.pem" 2048 2>/dev/null) \
+    || die 1 keygen "openssl couldn't create the Proxy's keys"
+  [ -s "$ONB/api-key.env" ] || (umask 077; cp "$SKILL_DIR/templates/api-key.env.tmpl" "$ONB/api-key.env")
+  [ -s "$ONB/proxy.env" ] || (umask 077; cp "$SKILL_DIR/templates/proxy.env.tmpl" "$ONB/proxy.env")
+  chmod 600 "$ONB/api-key.env" "$ONB/proxy.env"
+  proxy_urls
+  env_set "$ONB/proxy.env" PASSPORT_PROXY_PUBLIC_URL "$PUB_URL"
+  env_set "$ONB/proxy.env" PASSPORT_PROXY_PUBLIC_MANAGEMENT_URL "$MGMT_URL"
+  env_set "$ONB/proxy.env" PASSPORT_PROXY_JWKS_URL "$PASSPORT_JWKS_URL"
+  env_set "$ONB/proxy.env" VAULT_ADDR "http://$VAULT_C:8200"
+  env_set "$ONB/proxy.env" VAULT_TOKEN "$(cat "$ONB/vault/root-token")"
+  # Console sign-in (older proxy.env files lack it); never overwrite a value the user set.
+  grep -q '^PASSPORT_PROXY_CONSOLE_USER=' "$ONB/proxy.env" || env_set "$ONB/proxy.env" PASSPORT_PROXY_CONSOLE_USER admin
+  grep -q '^PASSPORT_PROXY_CONSOLE_PASSWORD_HASH=' "$ONB/proxy.env" || env_set "$ONB/proxy.env" PASSPORT_PROXY_CONSOLE_PASSWORD_HASH "$(sed -n 's/^PASSPORT_PROXY_CONSOLE_PASSWORD_HASH=//p' "$SKILL_DIR/templates/proxy.env.tmpl")"
+  [ -n "$(sget .teamId)" ] && env_set "$ONB/proxy.env" PASSPORT_PROXY_ALLOWED_TEAM_IDS "$(sget .teamId)"
+  emit "{\"apiKeyFile\":$(js "$ONB/api-key.env"),\"proxyEnvFile\":$(js "$ONB/proxy.env"),\"proxyUrl\":$(js "$PUB_URL"),\"apiKeyFilled\":$([ -n "$(env_get "$ONB/api-key.env" PASSPORT_API_KEY)" ] && echo true || echo false),\"proxyIdFilled\":$([ -n "$(env_get "$ONB/proxy.env" PASSPORT_PROXY_ID)" ] && echo true || echo false),\"proxyTokenFilled\":$([ -n "$(env_get "$ONB/proxy.env" PASSPORT_PROXY_TOKEN)" ] && echo true || echo false)}"
+}
+
+cmd_key() {
+  STAGE=proxy
+  case ${1:-} in
+    check) key_check;;
+    *) die 1 usage "passport-onboard key check";;
+  esac
+}
+key_check() {
+  need curl jq; state_init
+  [ -s "$ONB/api-key.env" ] || die 3 prepare_first "Run: passport-onboard proxy prepare"
+  [ -n "$(env_get "$ONB/api-key.env" PASSPORT_API_KEY)" ] || die 2 key_empty "PASSPORT_API_KEY in $ONB/api-key.env is still empty"
+  api GET /public/v1/me
+  case $API_STATUS in
+    200)
+      local team role pid
+      team=$(jq -r '.data.teamId // empty' "$API_BODY"); role=$(jq -r '.data.role // empty' "$API_BODY")
+      [ -n "$team" ] || die 1 me_shape "GET /public/v1/me returned no teamId"
+      [ "$role" = admin ] || die 3 not_admin "This API key belongs to a team member, not an admin. Create the key as a team admin, or sign up fresh with a new team."
+      sset '.teamId = $v' "$team"
+      [ -s "$ONB/proxy.env" ] && env_set "$ONB/proxy.env" PASSPORT_PROXY_ALLOWED_TEAM_IDS "$team"
+      mark_done account
+      api GET /public/v1/proxies
+      if [ "$API_STATUS" = 200 ]; then
+        pid=$(env_get "$ONB/proxy.env" PASSPORT_PROXY_ID)
+        if jq -e --arg id "$pid" '[.data[]? | select(.id != $id)] | length > 0' "$API_BODY" >/dev/null; then
+          die 2 other_proxy_configuration "Your team already has a Proxy Configuration that isn't the one in proxy.env. If you just created it, paste its Proxy ID into proxy.env first. Otherwise delete it in the app ($PASSPORT_APP_URL/access-proxies), then continue. The skill never deletes it."
+        fi
+        emit "{\"teamId\":$(js "$team"),\"admin\":true,\"proxyListChecked\":true}"
+      else
+        emit "{\"teamId\":$(js "$team"),\"admin\":true,\"proxyListChecked\":false,\"note\":$(js "Couldn't list Proxy Configurations (HTTP $API_STATUS); check Proxy Configuration in the app instead")}"
+      fi;;
+    401|403) die 2 key_rejected "Passport Cloud rejected the API key in $ONB/api-key.env ($API_STATUS). Paste a fresh key from $PASSPORT_APP_URL/me/api-keys.";;
+    *) die 1 api_error "GET /public/v1/me returned $API_STATUS. $(api_err)";;
+  esac
+}
+
+proxy_start() {
+  need docker jq
+  local f=$ONB/proxy.env sha i ports
+  [ -s "$f" ] || die 3 prepare_first "Run: passport-onboard proxy prepare"
+  [ -n "$(env_get "$f" PASSPORT_PROXY_ID)" ] || die 2 proxy_id_empty "PASSPORT_PROXY_ID in $f is still empty"
+  [ -n "$(env_get "$f" PASSPORT_PROXY_TOKEN)" ] || die 2 proxy_token_empty "PASSPORT_PROXY_TOKEN in $f is still empty"
+  [ -n "$(env_get "$f" PASSPORT_PROXY_ALLOWED_TEAM_IDS)" ] || die 3 team_unknown "Team ID not known yet. Run: passport-onboard key check"
+  vault_ok || die 3 vault_down "The Secret Vault (HashiCorp) isn't running. Run: passport-onboard vault up"
+  env_set "$f" PASSPORT_PROXY_HEARTBEAT_ENABLED true   # older proxy.env files lack it; without it the Proxy never registers
+  sha=$(openssl dgst -sha256 "$f" | awk '{print $NF}')
+  if exists "$PROXY_C"; then
+    ours "$PROXY_C" || die 3 name_taken "A container named $PROXY_C exists and wasn't made by this skill. Rename or remove it yourself, then rerun."
+    if [ "$(docker inspect -f "{{index .Config.Labels \"$LABEL.env\"}}" "$PROXY_C")" = "$sha" ]; then
+      running "$PROXY_C" || docker start "$PROXY_C" >/dev/null || die 1 proxy_start "docker start $PROXY_C failed"
+    else
+      docker rm -f "$PROXY_C" >/dev/null   # our own container, recreated so it reads the edited env file
+    fi
+  fi
+  if ! exists "$PROXY_C"; then
+    # Pull first; a local copy is the offline fallback.
+    docker pull -q "$PASSPORT_PROXY_IMAGE" >/dev/null 2>&1 || docker image inspect "$PASSPORT_PROXY_IMAGE" >/dev/null 2>&1 || die 1 image_pull "Couldn't download the Proxy image $PASSPORT_PROXY_IMAGE. See troubleshooting.md, 'Proxy image'."
+    ports=(-p 127.0.0.1:8443:8443 -p 127.0.0.1:8081:8081)
+    [ "$(env_get "$f" PASSPORT_PROXY_PUBLIC_URL)" = https://passport-proxy.localhost ] && ports+=(-p 127.0.0.1:443:8443 -p 127.0.0.1:80:8081)
+    docker run -d --name "$PROXY_C" --label "$LABEL=1" --label "$LABEL.env=$sha" --network "$NET" \
+      --restart unless-stopped --user "$(id -u):$(id -g)" "${ports[@]}" \
+      -v "$ONB/keys:/keys:ro" -v "$ONB/audit:/audit" --env-file "$f" "$PASSPORT_PROXY_IMAGE" >/dev/null 2>&1 \
+      || die 1 proxy_run "docker run failed for the Proxy. Check ports 8443/8081 (and 443/80) are free."
+  fi
+  # Proof of registration is Passport Cloud's status for this Proxy ID, never a log line: log
+  # wording changes with the Proxy. The logs go back to the agent to read when it isn't healthy.
+  local pid r0 cloud=null logs
+  pid=$(env_get "$f" PASSPORT_PROXY_ID); r0=$(restarts "$PROXY_C")
+  for i in $(seq 1 18); do   # about 90 s: enrollment, then the first heartbeat
+    { running "$PROXY_C" && [ "$(restarts "$PROXY_C")" = "$r0" ]; } || break   # exited, or the restart policy is looping
+    api GET /public/v1/proxies
+    if [ "$API_STATUS" = 200 ]; then
+      cloud=$(jq -c --arg id "$pid" '[.data[]? | select(.id == $id) | .status][0] // null' "$API_BODY" 2>/dev/null) || cloud=null
+      [ "$cloud" = '"healthy"' ] && break
+    else
+      cloud=unknown; [ "$i" -ge 6 ] && break   # can't ask Passport Cloud: give the Proxy 30 s, then hand over the logs
+    fi
+    sleep 5
+  done
+  logs=$(docker logs --tail 30 "$PROXY_C" 2>&1 | redact)
+  if ! running "$PROXY_C" || [ "$(restarts "$PROXY_C")" != "$r0" ]; then
+    docker stop "$PROXY_C" >/dev/null 2>&1   # our own container: stop the restart loop until the fix is in
+    die 1 proxy_crashed "The Proxy stopped or keeps restarting. Its last log lines are in error.logs." "$logs"
+  fi
+  case $cloud in
+    '"healthy"'|unknown) ;;
+    null) die 2 proxy_not_found "Passport Cloud has no Proxy Configuration with the PASSPORT_PROXY_ID in $f. Copy the ID again from $PASSPORT_APP_URL/access-proxies." "$logs";;
+    '"setup_expired"') die 2 proxy_setup_expired "The enrollment token expired or was revoked. Create a new one on the Proxy Configuration page ($PASSPORT_APP_URL/access-proxies) and paste it into PASSPORT_PROXY_TOKEN in $f." "$logs";;
+    '"disabled"') die 2 proxy_disabled "This Proxy Configuration is disabled in the app. Enable it at $PASSPORT_APP_URL/access-proxies, then rerun." "$logs";;
+    *) die 2 proxy_not_healthy "Passport Cloud reports the Proxy as $cloud after 90 s. Its last log lines are in error.logs." "$logs";;
+  esac
+  mark_done proxy
+  [ "$cloud" = unknown ] && cloud=null
+  emit "{\"container\":$(js "$PROXY_C"),\"registered\":$([ "$cloud" = '"healthy"' ] && echo true || echo null),\"proxyUrl\":$(js "$(env_get "$f" PASSPORT_PROXY_PUBLIC_URL)"),\"consoleUrl\":$(js "$(env_get "$f" PASSPORT_PROXY_PUBLIC_MANAGEMENT_URL)/console"),\"consoleUser\":$(js "$(env_get "$f" PASSPORT_PROXY_CONSOLE_USER)"),\"cloudStatus\":$cloud$([ "$cloud" = null ] && printf ',"logs":%s' "$(js "$logs")")}"
+}
+
+cmd_cli() {
+  STAGE=cli
+  case ${1:-} in
+    check)
+      need passport; state_init
+      if passport whoami >/dev/null 2>&1; then mark_done cli; emit '{"signedIn":true}'
+      else emit '{"signedIn":false}' agent "Not signed in yet" "passport login"; exit 2; fi;;
+    *) die 1 usage "passport-onboard cli check";;
+  esac
+}
+
+cmd_demo() {
+  STAGE=demo
+  need curl jq; state_init
+  case ${1:-} in
+    plan) emit "{\"objects\":[
+      {\"type\":\"Namespace\",\"name\":\"$DEMO_NS\"},
+      {\"type\":\"Resource Group\",\"name\":\"$DEMO_RG\",\"host\":\"$PASSPORT_DEMO_API_HOST\"},
+      {\"type\":\"Secret Reference\",\"name\":\"demo\",\"vaultPath\":\"secret/demo-api-key\"},
+      {\"type\":\"Endpoint\",\"method\":\"GET\",\"host\":\"$PASSPORT_DEMO_API_HOST\",\"path\":\"/\",\"slot\":\"x-demo-api-key\"},
+      {\"type\":\"Access Request\",\"durationDays\":7}]}";;
+    apply) demo_apply;;
+    verify) demo_verify;;
+    *) die 1 usage "passport-onboard demo plan | demo apply | demo verify";;
+  esac
+}
+demo_apply() {
+  local ns rg ref ep gr ar st objs='' reused i
+  add() { objs="$objs${objs:+,}{\"type\":$(js "$1"),\"id\":$(js "$2"),\"reused\":$3}"; }
+  ns=$(find_id /public/v1/namespaces '.name == $v' "$DEMO_NS") || die 1 api_error "Listing Namespaces failed ($(api_status)). $(api_err)"
+  reused=true; [ -n "$ns" ] || { reused=false
+    ns=$(create /public/v1/namespaces "$(jq -nc --arg n "$DEMO_NS" '{name:$n,description:"Passport onboarding demo"}')") || die 1 api_error "Creating the Namespace failed. $(api_err)"; }
+  sset '.demo.ns = $v' "$ns"; add Namespace "$ns" $reused
+  rg=$(find_id "/public/v1/namespaces/$ns/resource-groups" '.name == $v' "$DEMO_RG") || die 1 api_error "Listing Resource Groups failed. $(api_err)"
+  reused=true; [ -n "$rg" ] || { reused=false
+    rg=$(create "/public/v1/namespaces/$ns/resource-groups" "$(jq -nc --arg n "$DEMO_RG" '{name:$n,description:"Passport onboarding demo",source:"manual"}')") || die 1 api_error "Creating the Resource Group failed. $(api_err)"; }
+  sset '.demo.rg = $v' "$rg"; add "Resource Group" "$rg" $reused
+  ref=$(find_id "/public/v1/namespaces/$ns/secret-references" '.name == $v' demo) || die 1 api_error "Listing Secret References failed. $(api_err)"
+  reused=true; [ -n "$ref" ] || { reused=false
+    ref=$(create "/public/v1/namespaces/$ns/secret-references" '{"name":"demo","vaultType":"hashicorp","vaultKey":"demo-api-key"}') || die 1 api_error "Creating the Secret Reference failed. $(api_err)"; }
+  sset '.demo.ref = $v' "$ref"; add "Secret Reference" "$ref" $reused
+  ep=$(find_id "/public/v1/namespaces/$ns/endpoints" '.method == "GET" and .host == $v and .path == "/"' "$PASSPORT_DEMO_API_HOST") || die 1 api_error "Listing Endpoints failed. $(api_err)"
+  reused=true; [ -n "$ep" ] || { reused=false
+    ep=$(create "/public/v1/namespaces/$ns/endpoints" "$(jq -nc --arg h "$PASSPORT_DEMO_API_HOST" --arg r "$ref" --arg g "$rg" '{method:"GET",host:$h,path:"/",secrets:[{label:"x-demo-api-key",secretReferenceId:$r}],resourceGroupIds:[$g]}')") || die 1 api_error "Creating the Endpoint failed. $(api_err)"; }
+  sset '.demo.ep = $v' "$ep"; add Endpoint "$ep" $reused
+  gr=$(active_grant "$ns" "$rg" "$ep") || die 1 api_error "Listing Access Grants failed. $(api_err)"
+  reused=true
+  if [ -z "$gr" ]; then
+    reused=false
+    ar=$(create /public/v1/access-requests "$(jq -nc --arg ns "$ns" --arg ep "$ep" '{namespaceId:$ns,entities:[{type:"resource_endpoint",id:$ep}],message:"Passport onboarding demo",durationDays:7}')") || die 1 api_error "Creating the Access Request failed. $(api_err)"
+    sset '.demo.ar = $v' "$ar"; add "Access Request" "$ar" false
+    st=$(jq -r '.data.status // empty' "$API_BODY" 2>/dev/null)
+    if [ "$st" != approved ]; then
+      api GET "/public/v1/access-requests/$ar"
+      [ "$API_STATUS" = 200 ] || die 1 api_error "Reading the Access Request failed ($API_STATUS). $(api_err)"
+      st=$(jq -r '.data.status // empty' "$API_BODY" 2>/dev/null)
+    fi
+    [ "$st" = approved ] || { emit "{\"objects\":[$objs],\"accessRequest\":$(js "$st")}" user "The Access Request is $st. Approve it in the app: $PASSPORT_APP_URL/approval-requests" "passport-onboard demo apply"; exit 2; }
+    for i in 1 2 3 4 5; do gr=$(active_grant "$ns" "$rg" "$ep"); [ -n "$gr" ] && break; sleep 2; done
+    [ -n "$gr" ] || die 1 grant_missing "The request is approved but no active Access Grant showed up yet. Rerun in a minute."
+  fi
+  sset '.demo.grant = $v' "$gr"; add "Access Grant" "$gr" $reused
+  emit "{\"objects\":[$objs]}" agent "Demo objects ready" "passport-onboard demo verify"
+}
+demo_verify() {
+  need passport
+  local ref key len st
+  [ -n "$(sget .demo.grant)" ] || die 3 demo_first "Run: passport-onboard demo apply"
+  passport refresh >/dev/null 2>&1 || die 1 refresh_failed "passport refresh failed. Is the CLI signed in? Run: passport login"
+  ref=$(pointer "GET $PASSPORT_DEMO_API_HOST/" demo)
+  [ -n "$ref" ] || die 1 no_pointer "Your client certificate has no pointer for GET $PASSPORT_DEMO_API_HOST/ yet. Check the Access Grant is active in the app ($PASSPORT_APP_URL), then rerun."
+  via_proxy GET "https://$PASSPORT_DEMO_API_HOST/" "" "x-demo-api-key: {{vault:$ref}}"
+  [ -n "$CLI_REAUTH" ] && die 2 cli_signed_out "The Passport CLI's sign-in expired. Run: passport login"
+  st=$(jq -r '.status // empty' "$API_BODY" 2>/dev/null); key=$(jq -r '.key // empty' "$API_BODY" 2>/dev/null); len=$(jq -r '.key_length // empty' "$API_BODY" 2>/dev/null)
+  if [ "$st" = authenticated ] && [ "$len" = 19 ]; then
+    mark_done demo
+    emit "{\"pass\":true,\"http\":$(js "$API_STATUS"),\"pointer\":$(js "$ref"),\"keyReceived\":$(js "$key"),\"keyLength\":$len,\"console\":$(console_view "$ref")}"
+  else
+    die 1 demo_failed "The demo call didn't pass (HTTP $API_STATUS, received ${key:-nothing}, length ${len:-?}${PROXY_ERR:+, proxy error $PROXY_ERR}). See troubleshooting.md."
+  fi
+}
+
+cmd_handson() {
+  STAGE=handson
+  need curl jq; state_init
+  case ${1:-} in
+    plan) local ui create=''; ui=$(vault_ui)
+      # The Secret Vault (HashiCorp) UI's create form, path filled in; it survives the sign-in redirect.
+      [ -n "$ui" ] && create="$ui/vault/secrets-engines/secret/kv/create?initialKey=$(jq -rn --arg p "$HANDSON_PATH" '$p|@uri')"
+      emit "{\"vault\":{\"mount\":\"secret\",\"path\":\"$HANDSON_PATH\",\"key\":\"value\",\"ui\":$(js "$ui"),\"createUrl\":$(js "$create")},\"objects\":[
+      {\"type\":\"Namespace\",\"name\":\"$HANDSON_NS\"},
+      {\"type\":\"Resource Group\",\"name\":\"$HANDSON_RG\",\"host\":\"$API_HOST\"},
+      {\"type\":\"Secret Reference\",\"name\":\"$HANDSON_SECRET\",\"vaultType\":\"hashicorp\",\"vaultPath\":\"$HANDSON_PATH\"},
+      {\"type\":\"Endpoint\",\"method\":\"*\",\"host\":\"$API_HOST\",\"path\":\"/public/v1/*\",\"slot\":\"Authorization\",\"slotSecretReference\":\"$HANDSON_SECRET\",\"requestHeader\":\"Authorization: Bearer {{vault:<your pointer>}}\"},
+      {\"type\":\"Access Request\",\"on\":\"the Resource Group\",\"durationDays\":90}]}";;
+    check) handson_check;;
+    verify) handson_verify;;
+    finish) handson_finish;;
+    *) die 1 usage "passport-onboard handson plan | check | verify | finish";;
+  esac
+}
+handson_check() {
+  local ns='' ep='' near='' rg='' ref='' gr='' secret=false missing=0 items=''
+  item() { items="$items${items:+,}{\"object\":$(js "$1"),\"found\":$2${3:+,\"id\":$(js "$3")}${4:+,\"why\":$(js "$4")}}"; [ "$2" = true ] || missing=$((missing + 1)); }
+  vault_ok && vexec kv get -format=json "secret/$HANDSON_PATH" 2>/dev/null | jq -e '(.data.data.value // "") | length > 0' >/dev/null && secret=true
+  item "Secret Vault (HashiCorp) secret secret/$HANDSON_PATH with key value" $secret
+  ns=$(find_id /public/v1/namespaces '.name == $v' "$HANDSON_NS") || die 1 api_error "Listing Namespaces failed ($(api_status)). $(api_err)"
+  item "Namespace $HANDSON_NS" "$([ -n "$ns" ] && echo true || echo false)" "$ns"
+  if [ -n "$ns" ]; then
+    # An API failure must read as an error, not as "you haven't created it".
+    local fail="Checking the hands-on objects failed"
+    rg=$(find_id "/public/v1/namespaces/$ns/resource-groups" 'true' "") || die 1 api_error "$fail ($(api_status)). $(api_err)"
+    item "Resource Group in $HANDSON_NS" "$([ -n "$rg" ] && echo true || echo false)" "$rg"
+    ref=$(find_id "/public/v1/namespaces/$ns/secret-references" '.name == $v' "$HANDSON_SECRET") || die 1 api_error "$fail ($(api_status)). $(api_err)"
+    item "Secret Reference $HANDSON_SECRET" "$([ -n "$ref" ] && echo true || echo false)" "$ref"
+    # Any slot label works: the Proxy swaps the pointer wherever the slot allows it.
+    ep=$(find_id "/public/v1/namespaces/$ns/endpoints" "(.method == \"*\") and .host == \$v and .path == \"/public/v1/*\" and ((.resourceGroupIds // []) | length > 0) and any(.secrets[]?; .secretReferenceId == \"$ref\")" "$API_HOST") \
+      || die 1 api_error "$fail ($(api_status)). $(api_err)"
+    local why=''
+    if [ -z "$ep" ]; then # say what differs on the nearest Endpoint for this host
+      near=$(find_id "/public/v1/namespaces/$ns/endpoints" '.host == $v' "$API_HOST") || die 1 api_error "$fail ($(api_status)). $(api_err)"
+      if [ -z "$near" ]; then why="No Endpoint has the host $API_HOST."
+      else why=$(jq -r --arg id "$near" --arg ref "$ref" --arg s "$HANDSON_SECRET" '.data[] | select(.id == $id) | [
+          (if .method != "*" then "Its method is \(.method). Set it to *." else empty end),
+          (if .path != "/public/v1/*" then "Its path is \(.path). Set it to /public/v1/*." else empty end),
+          (if ((.resourceGroupIds // []) | length) == 0 then "It is in no Resource Group. Add it to one." else empty end),
+          (if ($ref != "" and any(.secrets[]?; .secretReferenceId == $ref)) then empty else "No slot sends the Secret Reference \($s). Add one." end)
+        ] | join(" ")' "$API_BODY")
+      fi
+    fi
+    item "Endpoint * $API_HOST/public/v1/* in a Resource Group, with a slot for $HANDSON_SECRET" "$([ -n "$ep" ] && echo true || echo false)" "$ep" "$why"
+    if [ -n "$ep" ]; then
+      api GET "/public/v1/endpoints/$ep"
+      [ "$API_STATUS" = 200 ] || die 1 api_error "$fail ($API_STATUS). $(api_err)"
+      rg=$(jq -r '.data.resourceGroupIds[0] // empty' "$API_BODY" 2>/dev/null)
+      gr=$(active_grant "$ns" "$rg" "$ep") || die 1 api_error "$fail ($(api_status)). $(api_err)"
+    fi
+    item "Active Access Grant covering that Endpoint" "$([ -n "$gr" ] && echo true || echo false)" "$gr"
+  fi
+  [ -n "$ref" ] && sset '.handson.ref = $v' "$ref"
+  [ -n "$ns" ] && sset '.handson.ns = $v' "$ns"
+  if [ "$missing" -eq 0 ]; then emit "{\"complete\":true,\"items\":[$items]}" agent "Everything is in place" "passport-onboard handson verify"
+  else emit "{\"complete\":false,\"items\":[$items]}" user "$missing item(s) still missing"; exit 2; fi
+}
+handson_verify() {
+  need passport
+  local ref
+  passport refresh >/dev/null 2>&1 || die 1 refresh_failed "passport refresh failed. Is the CLI signed in? Run: passport login"
+  ref=$(pointer "$HANDSON_EP" "$HANDSON_SECRET")
+  [ -n "$ref" ] || die 1 no_pointer "Your client certificate has no pointer for $HANDSON_EP yet. Check the Access Grant on $HANDSON_RG is active in the app ($PASSPORT_APP_URL), then rerun."
+  via_proxy GET "$PASSPORT_API_URL/public/v1/namespaces" "" "Authorization: Bearer {{vault:$ref}}"
+  [ -n "$CLI_REAUTH" ] && die 2 cli_signed_out "The Passport CLI's sign-in expired. Run: passport login"
+  if [ "$API_STATUS" = 200 ] && jq -e --arg n "$HANDSON_NS" '[.data[]?.name] | index($n)' "$API_BODY" >/dev/null 2>&1; then
+    sset '.handson.verified = $v' true
+    emit "{\"pass\":true,\"http\":200,\"namespaces\":$(jq -c '[.data[]?.name]' "$API_BODY"),\"pointer\":$(js "$ref"),\"console\":$(console_view "$ref")}" user "Revoke the first API key in the app, then tell me" "passport-onboard handson finish"
+  else
+    die 1 handson_failed "The call through the Proxy didn't pass (HTTP $API_STATUS${PROXY_ERR:+, proxy error $PROXY_ERR}). $(api_err) See troubleshooting.md."
+  fi
+}
+handson_finish() { # confirms the first key is revoked, then deletes its file
+  local key code f=$ONB/api-key.env
+  [ "$(sget .handson.verified)" = true ] || die 3 verify_first "Run: passport-onboard handson verify"
+  key=$(env_get "$f" PASSPORT_API_KEY)
+  if [ -n "$key" ]; then
+    code=$(printf 'header = "Authorization: Bearer %s"\n' "$key" | curl -sS -m 30 --config - -o /dev/null -w '%{http_code}' "$PASSPORT_API_URL/public/v1/namespaces")
+    case $code in
+      401|403) ;;
+      *) emit "{\"revoked\":false,\"http\":$(js "$code")}" user "The first key still works. Revoke it in the app ($PASSPORT_APP_URL/me/api-keys); revocation takes about 45 seconds" "passport-onboard handson finish"; exit 2;;
+    esac
+  fi
+  rm -f "$f"; mark_done handson
+  emit "{\"revoked\":true,\"keyFileDeleted\":true}"
+}
+
+usage() {
+  cat <<EOF
+passport-onboard — agent-side helper for the passport-setup skill (the user never runs it)
+  status [--line]      where setup stands; --line prints the progress line
+  mark <stage>         record a stage the user finished ($STAGES)
+  doctor               machine check
+  vault up             start the Secret Vault (HashiCorp) (persistent, unlocks itself), seed the demo secret
+  vault check <path>   does secret/<path> exist with a key named value (never prints it)
+  proxy prepare        create the Proxy's keys and the two files the user fills in
+  key check            check the API key: team admin, team ID, existing Proxy Configuration
+  proxy start          start the Proxy from proxy.env and wait until it registers
+  cli check            is the Passport CLI signed in
+  demo plan|apply|verify
+  handson plan|check|verify|finish
+EOF
+}
+
+case ${1:-} in
+  status) shift; cmd_status "$@";;
+  mark) shift; cmd_mark "$@";;
+  doctor) cmd_doctor;;
+  vault) shift; cmd_vault "$@";;
+  proxy) shift; cmd_proxy "$@";;
+  key) shift; cmd_key "$@";;
+  cli) shift; cmd_cli "$@";;
+  demo) shift; cmd_demo "$@";;
+  handson) shift; cmd_handson "$@";;
+  -h|--help|help|'') usage;;
+  *) usage >&2; exit 1;;
+esac

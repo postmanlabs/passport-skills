@@ -2,24 +2,22 @@
 
 # passport-skills
 
-> **Note:** the AWS guide creates billable resources.
-
-Set up a Postman Passport proxy and **prove it works end to end**: a client calls an API with only a
-`{{vault:<uuid>}}` pointer, and the proxy injects the real secret in flight.
+Set up Postman Passport on your machine and **prove it works end to end**: a client calls an API with
+only a `{{vault:<uuid>}}` pointer, and the Passport Proxy injects the real secret in flight. macOS and
+Linux; Windows isn't supported yet.
 
 One `passport` plugin, two skills:
 
 | Skill | Use it to | Starts when |
 |---|---|---|
-| [`passport-setup`](skills/passport-setup/SKILL.md) | Set up and verify a proxy — local Docker or a single AWS EC2 instance | you say **`setup passport`** |
-| [`passport-public-api`](skills/passport-public-api/SKILL.md) | Register APIs and manage credentials (secret references, bindings, access requests) programmatically via the Passport public API | a task needs an API credential instead of a `.env` file |
+| [`passport-setup`](skills/passport-setup/SKILL.md) | Set up a Passport Proxy and a Secret Vault (HashiCorp) in Docker on your machine, verify secret resolution with a sample API, then protect your first API | you say **`setup passport`** |
+| [`passport-public-api`](skills/passport-public-api/SKILL.md) | Register APIs and manage credentials (Secret References, bindings, access requests) through the Passport public API | a task needs an API credential instead of a `.env` file |
 
-`passport-public-api` assumes a proxy is already set up; if one isn't, it points back to `passport-setup`.
+`passport-public-api` assumes Passport is already set up; if it isn't, it points back to `passport-setup`.
 
 ## Install
-Pick the line for your agent. Installing the plugin gets **both** skills. Then type **`setup passport`**
-to stand up a proxy (it asks **local Docker or AWS**), or just describe an API-credential task to use
-`passport-public-api`.
+Pick the line for your agent. Installing the plugin gets **both** skills. Then type **`setup passport`**,
+or just describe an API-credential task to use `passport-public-api`.
 
 | Agent | Install |
 |---|---|
@@ -35,7 +33,14 @@ If your Claude Code doesn't recognise `--marketplace`, use
 **Already have it installed?** Marketplace manifests are cached, so refresh before updating:
 `/plugin marketplace update postmanlabs/passport-skills`, then `/plugin update passport` (Codex:
 `codex plugin marketplace update postmanlabs/passport-skills`; `npx skills add` re-run pulls the
-latest). `passport-public-api` arrived in 0.3.0.
+latest). 0.4.0 replaces the old step-by-step guides and drops the AWS path.
+
+**Coming from 0.3.x:**
+- Set up on AWS? 0.4.0 can't remove it. Use the old guide's
+  [cleanup step](https://github.com/postmanlabs/passport-skills/blob/c301a87/skills/passport-setup/guides/aws-single-instance.md#10-cleanup-only-when-the-user-explicitly-asks-approval-block-d).
+- 0.4.0 makes a new local setup. It doesn't take over a Proxy you already run: if your team has a
+  Proxy Configuration, setup stops and asks you to delete it in the app first.
+- Finish passport-setup first. passport-public-api now calls the API through the Proxy.
 
 ### Or run it from a clone
 ```
@@ -44,57 +49,49 @@ cd passport-skills
 # start your agent here and type:
 setup passport
 ```
-The agent reads `AGENTS.md`, which points it at the right skill. No agent? Open the guide and follow it by hand.
-
-| Guide | What it does |
-|---|---|
-| [`guides/local-docker.md`](skills/passport-setup/guides/local-docker.md) | Proxy + disposable HashiCorp Vault in Docker on your machine |
-| [`guides/aws-single-instance.md`](skills/passport-setup/guides/aws-single-instance.md) | Proxy on one EC2 instance (stock Amazon Linux 2023), local Vault, CloudFront HTTPS management, read-only preflight, full cleanup |
-| [`guides/after-setup.md`](skills/passport-setup/guides/after-setup.md) | Shared by both: the handoff and adding your own API |
+The agent reads `AGENTS.md`, which points it at the right skill. The stage-by-stage flow is in
+[`references/stages.md`](skills/passport-setup/references/stages.md).
 
 ## Prerequisites
-- A Passport Cloud team and a **registry key** (Org Settings → Registry; needs admin).
-- Docker (local) or an AWS account + CLI profile (AWS).
-- `openssl`, `curl`, `jq`, `node`.
-- For `passport-public-api`: a running proxy (from `passport-setup`) and a WorkOS **API key**
-  (Organization → API keys).
+- macOS or Linux with Docker (Docker Desktop, OrbStack, Colima, or Docker Engine).
+- `curl`, `jq`, `openssl`. The skill checks for them and the Passport CLI, and offers the install command
+  for anything missing.
+- A Passport account; the skill helps you sign up. You need to be a team admin; a new signup is one.
 
 ## Safety
-Secrets never go in chat, user-data or logs; every AWS change is confirmed first; teardown only runs when you say so.
+Secrets never go in the chat: you paste them into files on your machine or into the Secret Vault (HashiCorp) UI.
+The skill never reads the CLI's `passportrc`, never approves its own access requests, shows its plan
+before creating anything, and never deletes anything it didn't make.
 
 ## What the skills run and connect to
-The plugin has no hooks, MCP servers or background processes. Everything below is a step in a skill's
-guide that the agent runs in your terminal once that skill is in use.
+The plugin has no hooks, MCP servers or background processes of its own. Everything below is a step the
+agent runs in your terminal once a skill is in use.
 
-- **Installs:** the full Passport CLI with the official installer from `dl-passport.pstmn.io`
-  (`unix.sh` on macOS/Linux, `win64.ps1` on Windows). The
-  AWS guide also installs the AWS CLI v2 from `awscli.amazonaws.com` and the Session Manager plugin
-  from `s3.amazonaws.com` if they're missing.
-- **Docker images:** the Passport proxy from `ociregistry.usepassport.ai` (after `docker login` with
-  your registry key), `hashicorp/vault` for the local Vault, and `node:20` for the CLI daemon on MDM Macs.
-- **Passport services:** `app.usepassport.ai` and `api.usepassport.ai`, for sign-in, the public API, and
-  proxy registration.
-- **AWS (AWS guide only):** in the account and region you choose, it creates one EC2 instance, an
-  Elastic IP, a security group, an IAM role and instance profile, and a CloudFront distribution and
-  function. `checkip.amazonaws.com` is used to find your public IP for the security group.
-- **Verification calls:** a demo API at `passport-demo.mock.postman.postman.dev` and, optionally,
-  `api.github.com/user` as the "add your own API" example, both sent through your proxy.
-- **Secrets:** you keep them out of the chat. The registry key goes to `docker login` through stdin.
-  The WorkOS API key is read from an environment variable you set, and is sent only to
-  `api.usepassport.ai`. Vault secret values are typed at a hidden prompt (`read -s`) in your own
-  terminal.
+- **Installs, with your OK:** the Passport CLI with the official installer (you run it; it asks for your
+  password), and `curl`, `jq` or `openssl` from your package manager if they're missing.
+- **Docker:** `hashicorp/vault` and the Passport Proxy image, pulled anonymously (exact tags in
+  [`references/urls.env`](skills/passport-setup/references/urls.env)). Containers `passport-vault` and
+  `passport-proxy`, network `passport-net`, volume `passport-vault-data`, all on `127.0.0.1` only.
+- **Files:** `~/.passport/onboarding/` holds setup state, the Proxy's settings and keys, and the Secret Vault (HashiCorp) unseal key and root token, all readable only by you.
+- **Passport services:** the Passport app and API for sign-in, the public API, and Proxy registration.
+  The exact hosts are in `references/urls.env`.
+- **Verification calls:** a demo API (`references/urls.env`) and the Passport public API itself, both
+  sent through your Proxy.
 
 ## Layout
 ```
+shared/                   concepts.md (glossary + invariants) and urls.env — the single source,
+                          copied into each skill's references/ by tools/sync-shared.sh (CI checks it)
 skills/                   two skills, each self-contained (installs copy a skill's own folder)
-  passport-setup/         set up and verify a proxy
-    SKILL.md              rules and entry point
-    guides/               local-docker.md, aws-single-instance.md, after-setup.md (shared post-setup)
-                          + reference/ (shared: concepts, troubleshooting, MDM Macs, verification log)
-    scripts/              preflight.sh, env.sh, aws-resources.sh, passport-api.js
-    templates/            user-data, CloudFront, operator-iam-policy.json
-  passport-public-api/    register APIs and manage credentials via the public API
-    SKILL.md              the whole skill (no guides/scripts/templates)
+  passport-setup/
+    SKILL.md              rules, the script's contract, the stage list
+    references/           welcome, stages, troubleshooting, verification (+ the shared copies)
+    scripts/              passport-onboard, the agent's helper (the user never runs it)
+    templates/            proxy.env, api-key.env, Secret Vault (HashiCorp) config and start script
+  passport-public-api/
+    SKILL.md              the whole skill
+    references/           the shared copies
+tools/                    sync-shared.sh
 AGENTS.md                 entry point in a clone + rules for editing this repo
                           (CLAUDE.md, GEMINI.md, .cursor/, .github/ are one-line shims)
 .claude-plugin/           Claude Code marketplace "passport-skills" + plugin "passport"
