@@ -35,6 +35,13 @@ If your Claude Code doesn't recognise `--marketplace`, use
 `codex plugin marketplace update postmanlabs/passport-skills`; `npx skills add` re-run pulls the
 latest). 0.4.0 replaces the old step-by-step guides and drops the AWS path.
 
+**Coming from 0.3.x:**
+- Set up on AWS? 0.4.0 can't remove it. Use the old guide's
+  [cleanup step](https://github.com/postmanlabs/passport-skills/blob/c301a87/skills/passport-setup/guides/aws-single-instance.md#10-cleanup-only-when-the-user-explicitly-asks-approval-block-d).
+- 0.4.0 makes a new local setup. It doesn't take over a Proxy you already run: if your team has a
+  Proxy Configuration, setup stops and asks you to delete it in the app first.
+- Finish passport-setup first. passport-public-api now calls the API through the Proxy.
+
 ### Or run it from a clone
 ```
 git clone https://github.com/postmanlabs/passport-skills

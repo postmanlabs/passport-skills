@@ -87,9 +87,8 @@ Run `passport-onboard vault up`. Report the container, the Secret Vault (HashiCo
    `PASSPORT_API_KEY=` and save. Don't paste it here."** Open the file for them
    (`open -t` on macOS, `xdg-open` on Linux).
 3. When they say done: `passport-onboard key check`. On `not_admin`,
-   `key_rejected` or `other_proxy_configuration`, show the hint and wait. On
-   `me_unavailable`, stop: the team ID can't be read until
-   `GET /public/v1/me` ships (see `troubleshooting.md`). When it passes, say:
+   `key_rejected` or `other_proxy_configuration`, show the hint and wait. When
+   it passes, say:
    **"Your key works. One thing to know: keeping an API key in a file like this
    isn't safe — any program running as you, including me, can read it. That's
    the exact problem Passport solves. At the end, when you protect your first
@@ -221,18 +220,20 @@ key."** Run `passport-onboard handson plan` for the values below.
       `passport/api-key`, the path from step 1 without `secret/`. It must
       exist before an Endpoint can send it.
    4. Endpoint: method `*`, host `<API host>`, path `/public/v1/*`, in that
-      Resource Group, with an `Authorization` slot mapped to the Secret
-      Reference `passport-api-key`. (The `Bearer ` prefix isn't set here; the
-      request carries it: `Authorization: Bearer {{vault:<your pointer>}}`.)
+      Resource Group, with a slot that sends the Secret Reference
+      `passport-api-key`. Any slot name works. (The request carries the
+      header: `Authorization: Bearer {{vault:<your pointer>}}`.)
    5. Access Request on that Resource Group for 90 days, the longest there is,
       because this grant is what keeps my access to the Passport API working.
       As the admin, yours is approved automatically.
-3. When they say done: `passport-onboard handson check`. Show each item as
-   found or missing; repeat until `data.complete`. If the secret is missing,
-   run `passport-onboard vault check passport/api-key` and tell the user which
-   part to fix: no secret at that path, or no key named `value`.
-4. `passport-onboard handson verify`: a call to the public API through the
-   Proxy using only the Secret Reference. Show the namespaces it returned.
+3. When they say done: `passport-onboard handson verify`, a call to the
+   public API through the Proxy with only the pointer. If it passes, show the
+   Namespaces it returned and go on to step 5.
+4. If it fails: `passport-onboard handson check`. Show each missing item with
+   its `why`, which says what to change. If the secret is missing, run
+   `passport-onboard vault check passport/api-key` and tell the user which
+   part to fix: no secret at that path, or no key named `value`. When
+   `data.complete` is true, run `handson verify` again.
 5. Open `<data.console.url>` again, then say: **"If the console asks you to
    sign in again, use `admin` / `passport-local` (written in
    `~/.passport/onboarding/proxy.env`, under *Proxy console*). In *Activity*,

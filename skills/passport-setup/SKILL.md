@@ -24,7 +24,7 @@ is in `references/stages.md`; follow it in order.
 1. **Secrets never go through the chat.** The user pastes them into the files
    or the Secret Vault (HashiCorp) UI the stages name. If a secret lands in the chat
    anyway, tell the user to revoke it and make a new one.
-2. **Never read `~/.passport/passportrc`** (or `~/.passport-beta/passportrc`).
+2. **Never read `~/.passport/passportrc`.**
    It holds live CLI tokens. Never print the contents of the files in
    `~/.passport/onboarding/` or run `docker inspect` on the Proxy's env.
 3. **Never approve your own Access Request.** An admin's request for
@@ -47,6 +47,13 @@ is in `references/stages.md`; follow it in order.
    "Passport Cloud", never "Postman Cloud".
 10. **Stay in this session.** Never give the user a command that starts a new
     agent session (such as `claude`); it loses everything done so far.
+11. **Write every line to the user in ASD-STE100:** short sentences, active
+    voice, one instruction in each sentence. This applies to the stage copy
+    you relay too, not to the notes for you in these files.
+    - Put the user's action first, in bold. Give the reason after it, in one
+      sentence.
+    - Put a warning before the action it guards, never after it.
+    - Keep it short. Give more detail only when the user asks.
 
 ## The script
 
@@ -93,7 +100,7 @@ who'd rather do it by hand.
 | Authenticate the CLI | agent runs `passport login`, user approves | `cli check` |
 | Verify secret resolution with a sample API | agent, after the user OKs the plan | `demo plan`, `demo apply`, `demo verify` |
 | Walk through what was created | user, in the app | `mark tour` |
-| Protect your first API | user builds, agent checks | `handson plan`, `check`, `verify` |
+| Protect your first API | user builds, agent checks | `handson plan`, `verify` (`check` if it fails) |
 | Revoke the setup key | user revokes, agent checks | `handson finish` |
 
 Coming back later: `status` reports `resume: true`; follow "Coming back" in

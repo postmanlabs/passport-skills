@@ -24,7 +24,7 @@ they live only in this table.
 | Access Request | A request for access to Endpoints. A team admin's request for themselves is approved automatically. | Approvals | `access-requests` |
 | Access Grant | Time-limited permission (7, 30 or 90 days) to call Endpoints. | My access | `access-grants` |
 | Client certificate | Issued to you by `passport login`; tells the Proxy who you are, which Endpoints you may call, and your pointer for each of their slots. | — | — |
-| Team | The people and catalog sharing one WorkOS `org_…` ID. | Team | `teamId` |
+| Team | The people and catalog that share one team ID. | Team | `teamId` |
 | Zone | A deployment boundary inside a team. Every team has Production. | — | `?zone=` |
 
 ## How a request is allowed
@@ -74,8 +74,8 @@ The Proxy checks every link before it swaps the pointer for the real value.
   again.** The certificate lists the Endpoints granted when it was issued, and a
   new Access Grant comes with new pointers. Code that keeps a pointer needs
   the new one once its grant is renewed; tell the user when you write such code.
-- **Never read `~/.passport/passportrc` or `~/.passport-beta/passportrc`.** They
-  hold live CLI tokens.
+- **Never read `~/.passport/passportrc`.** It holds
+  live CLI tokens.
 - **Never approve your own Access Request.** Approval is the user's decision;
   an admin's request for themselves is approved by the service.
 

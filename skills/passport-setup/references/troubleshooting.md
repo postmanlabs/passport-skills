@@ -20,7 +20,6 @@ don't retry silently. What has been tested is in `verification.md`.
 | `key_empty` | `PASSPORT_API_KEY` in `api-key.env` is blank | The user pastes the key and saves the file. |
 | `key_rejected` | Passport Cloud refused the API key (401/403) | The user creates a new key at `<app>/me/api-keys` and pastes it. |
 | `not_admin` | The key belongs to a team member | The user creates the key as a team admin, or signs up fresh with a new team. |
-| `me_unavailable` | `GET /public/v1/me` isn't on this Passport Cloud yet, so the team ID can't be read | Stop at the Proxy stage and tell the user it's waiting on that API (dependencies list). Never read the team ID from `passportrc`. |
 | `other_proxy_configuration` | The team already has a Proxy Configuration that isn't the one in `proxy.env` | The user deletes it in the app. The skill never deletes it. |
 | `team_unknown` | `PASSPORT_PROXY_ALLOWED_TEAM_IDS` is blank | Run `key check` first. |
 | `proxy_id_empty`, `proxy_token_empty` | `PASSPORT_PROXY_ID` or `PASSPORT_PROXY_TOKEN` in `proxy.env` is blank | The user copies both from the Proxy Configuration in the app and saves. |
@@ -33,7 +32,7 @@ don't retry silently. What has been tested is in `verification.md`.
 | `proxy_not_healthy` | After 90 s Passport Cloud still reports `not_connected` (never registered) or `unreachable` (no heartbeat for 3 minutes); the Proxy keeps retrying | Read `error.logs` for the reason (token refused, wrong Proxy ID, clock, network). Fix it, then rerun `proxy start`. |
 | `refresh_failed` | `passport refresh` failed | `passport login` again. |
 | `cli_signed_out` | The CLI's sign-in expired mid-call (`WORKOS_REAUTH_REQUIRED`) | `passport login`, then rerun the step. |
-| `demo_first`, `check_first`, `verify_first` | A step ran out of order | Run the step the hint names. |
+| `demo_first`, `verify_first` | A step ran out of order | Run the step the hint names. |
 | `grant_missing` | Approved, but the Access Grant isn't visible yet | Wait a minute; rerun `demo apply`. |
 | `no_pointer` | The client certificate has no pointer for the Endpoint, even after `passport refresh`: no active Access Grant covers it yet | Check the Access Grant in the app (pending, expired, or on another Resource Group), then rerun. |
 | `demo_failed`, `handson_failed` | The call through the Proxy didn't pass | See **Calls through the Proxy**, using the HTTP status and proxy error in the hint. |
@@ -56,10 +55,10 @@ don't retry silently. What has been tested is in `verification.md`.
 
 ## Proxy image
 
-The Proxy image in `references/urls.env` must be public. A `404`, `403` or
-`denied` on download means that tag isn't published yet; never ask for
-registry credentials.
-Tell the user the Proxy stage waits for the image (dependencies list).
+The Proxy image in `references/urls.env` is public. A `404`, `403` or
+`denied` on download means Docker can't reach the registry or the tag in
+`urls.env` is wrong. Check the network first. Never ask for registry
+credentials.
 
 ## Proxy keys lost
 

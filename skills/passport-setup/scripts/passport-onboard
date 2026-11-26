@@ -410,9 +410,6 @@ key_check() {
         emit "{\"teamId\":$(js "$team"),\"admin\":true,\"proxyListChecked\":false,\"note\":$(js "Couldn't list Proxy Configurations (HTTP $API_STATUS); check Proxy Configuration in the app instead")}"
       fi;;
     401|403) die 2 key_rejected "Passport Cloud rejected the API key in $ONB/api-key.env ($API_STATUS). Paste a fresh key from $PASSPORT_APP_URL/me/api-keys.";;
-    404) api GET /public/v1/namespaces
-         [ "$API_STATUS" = 200 ] || die 2 key_rejected "Passport Cloud rejected the API key ($API_STATUS)."
-         die 3 me_unavailable "The key works, but GET /public/v1/me isn't on $PASSPORT_API_URL yet, so the team ID can't be read. The Proxy stage waits for it.";;
     *) die 1 api_error "GET /public/v1/me returned $API_STATUS. $(api_err)";;
   esac
 }
@@ -436,7 +433,7 @@ proxy_start() {
     fi
   fi
   if ! exists "$PROXY_C"; then
-    # The tag is rebuilt in place, so pull it each time; a local copy is the offline fallback.
+    # Pull first; a local copy is the offline fallback.
     docker pull -q "$PASSPORT_PROXY_IMAGE" >/dev/null 2>&1 || docker image inspect "$PASSPORT_PROXY_IMAGE" >/dev/null 2>&1 || die 1 image_pull "Couldn't download the Proxy image $PASSPORT_PROXY_IMAGE. See troubleshooting.md, 'Proxy image'."
     ports=(-p 127.0.0.1:8443:8443 -p 127.0.0.1:8081:8081)
     [ "$(env_get "$f" PASSPORT_PROXY_PUBLIC_URL)" = https://passport-proxy.localhost ] && ports+=(-p 127.0.0.1:443:8443 -p 127.0.0.1:80:8081)
@@ -579,8 +576,8 @@ cmd_handson() {
   esac
 }
 handson_check() {
-  local ns='' ep='' rg='' ref='' gr='' secret=false missing=0 items=''
-  item() { items="$items${items:+,}{\"object\":$(js "$1"),\"found\":$2${3:+,\"id\":$(js "$3")}}"; [ "$2" = true ] || missing=$((missing + 1)); }
+  local ns='' ep='' near='' rg='' ref='' gr='' secret=false missing=0 items=''
+  item() { items="$items${items:+,}{\"object\":$(js "$1"),\"found\":$2${3:+,\"id\":$(js "$3")}${4:+,\"why\":$(js "$4")}}"; [ "$2" = true ] || missing=$((missing + 1)); }
   vault_ok && vexec kv get -format=json "secret/$HANDSON_PATH" 2>/dev/null | jq -e '(.data.data.value // "") | length > 0' >/dev/null && secret=true
   item "Secret Vault (HashiCorp) secret secret/$HANDSON_PATH with key value" $secret
   ns=$(find_id /public/v1/namespaces '.name == $v' "$HANDSON_NS") || die 1 api_error "Listing Namespaces failed ($(api_status)). $(api_err)"
@@ -592,9 +589,22 @@ handson_check() {
     item "Resource Group in $HANDSON_NS" "$([ -n "$rg" ] && echo true || echo false)" "$rg"
     ref=$(find_id "/public/v1/namespaces/$ns/secret-references" '.name == $v' "$HANDSON_SECRET") || die 1 api_error "$fail ($(api_status)). $(api_err)"
     item "Secret Reference $HANDSON_SECRET" "$([ -n "$ref" ] && echo true || echo false)" "$ref"
-    ep=$(find_id "/public/v1/namespaces/$ns/endpoints" "(.method == \"*\") and .host == \$v and .path == \"/public/v1/*\" and ((.resourceGroupIds // []) | length > 0) and any(.secrets[]?; ((.label // \"\") | ascii_downcase) == \"authorization\" and .secretReferenceId == \"$ref\")" "$API_HOST") \
+    # Any slot label works: the Proxy swaps the pointer wherever the slot allows it.
+    ep=$(find_id "/public/v1/namespaces/$ns/endpoints" "(.method == \"*\") and .host == \$v and .path == \"/public/v1/*\" and ((.resourceGroupIds // []) | length > 0) and any(.secrets[]?; .secretReferenceId == \"$ref\")" "$API_HOST") \
       || die 1 api_error "$fail ($(api_status)). $(api_err)"
-    item "Endpoint * $API_HOST/public/v1/* in a Resource Group, Authorization slot mapped to $HANDSON_SECRET" "$([ -n "$ep" ] && echo true || echo false)" "$ep"
+    local why=''
+    if [ -z "$ep" ]; then # say what differs on the nearest Endpoint for this host
+      near=$(find_id "/public/v1/namespaces/$ns/endpoints" '.host == $v' "$API_HOST") || die 1 api_error "$fail ($(api_status)). $(api_err)"
+      if [ -z "$near" ]; then why="No Endpoint has the host $API_HOST."
+      else why=$(jq -r --arg id "$near" --arg ref "$ref" --arg s "$HANDSON_SECRET" '.data[] | select(.id == $id) | [
+          (if .method != "*" then "Its method is \(.method). Set it to *." else empty end),
+          (if .path != "/public/v1/*" then "Its path is \(.path). Set it to /public/v1/*." else empty end),
+          (if ((.resourceGroupIds // []) | length) == 0 then "It is in no Resource Group. Add it to one." else empty end),
+          (if ($ref != "" and any(.secrets[]?; .secretReferenceId == $ref)) then empty else "No slot sends the Secret Reference \($s). Add one." end)
+        ] | join(" ")' "$API_BODY")
+      fi
+    fi
+    item "Endpoint * $API_HOST/public/v1/* in a Resource Group, with a slot for $HANDSON_SECRET" "$([ -n "$ep" ] && echo true || echo false)" "$ep" "$why"
     if [ -n "$ep" ]; then
       api GET "/public/v1/endpoints/$ep"
       [ "$API_STATUS" = 200 ] || die 1 api_error "$fail ($API_STATUS). $(api_err)"
@@ -610,7 +620,7 @@ handson_check() {
 }
 handson_verify() {
   need passport
-  local ref; [ -n "$(sget .handson.ref)" ] || die 3 check_first "Run: passport-onboard handson check"
+  local ref
   passport refresh >/dev/null 2>&1 || die 1 refresh_failed "passport refresh failed. Is the CLI signed in? Run: passport login"
   ref=$(pointer "$HANDSON_EP" "$HANDSON_SECRET")
   [ -n "$ref" ] || die 1 no_pointer "Your client certificate has no pointer for $HANDSON_EP yet. Check the Access Grant on $HANDSON_RG is active in the app ($PASSPORT_APP_URL), then rerun."
